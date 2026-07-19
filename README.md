@@ -19,6 +19,12 @@ only — nothing to `npm install`), and never sends anything off your machine.
 |---|---|
 | ![Disk Reclaim — light theme](docs/screenshot-light.png) | ![Disk Reclaim — dark theme](docs/screenshot-dark.png) |
 
+**Live scan checklist** — names each thing being scanned, with ✓ done, spinner in-progress, dim pending:
+
+| Light | Dark |
+|---|---|
+| ![Scanning checklist — light](docs/screenshot-scanning-light.png) | ![Scanning checklist — dark](docs/screenshot-scanning-dark.png) |
+
 <sub>Screenshots use synthetic demo data (`DEMO=1 node server.js`), not real disk contents.</sub>
 
 ---
