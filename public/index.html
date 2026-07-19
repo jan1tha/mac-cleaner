@@ -190,9 +190,28 @@
   .queued .l{font-size:11px;color:var(--ink-dim);}
   .safe-note{font-size:11.5px;color:var(--ink-faint);display:flex;align-items:center;gap:6px;}
 
-  .loading{max-width:1000px;margin:0 auto;padding:80px 22px;color:var(--ink-dim);display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:13px;}
-  .spin{width:15px;height:15px;border:2px solid var(--rule);border-top-color:var(--cyan);border-radius:50%;animation:sp .7s linear infinite;}
+  .loading{max-width:1000px;margin:0 auto;padding:70px 22px;display:flex;justify-content:center;}
+  .load-card{width:min(540px,92vw);background:var(--surface);border:1px solid var(--rule);border-radius:16px;box-shadow:var(--shadow);padding:22px 24px;}
+  .load-title{display:flex;align-items:center;gap:11px;font-weight:600;font-size:15px;margin-bottom:16px;}
+  .load-bar{height:9px;border-radius:6px;background:var(--surface-2);border:1px solid var(--rule);overflow:hidden;}
+  .load-fill{height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--cyan-deep),var(--cyan));box-shadow:0 0 16px -2px var(--cyan);transition:width .3s cubic-bezier(.22,.61,.36,1);}
+  .load-label{margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--ink-dim);}
+  .spin{width:15px;height:15px;border:2px solid var(--rule);border-top-color:var(--cyan);border-radius:50%;animation:sp .7s linear infinite;flex:none;}
   @keyframes sp{to{transform:rotate(360deg);}}
+
+  /* large files */
+  .lf{background:var(--surface);border:1px solid var(--rule);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:12px;}
+  .lf-note{padding:13px 18px;color:var(--ink-dim);font-size:12.5px;border-bottom:1px solid var(--rule);}
+  .lf-row{display:grid;grid-template-columns:1fr auto auto auto;gap:14px;align-items:center;padding:10px 18px;border-top:1px solid var(--rule);}
+  .lf-row:first-of-type{border-top:none;}
+  .lf-row:hover{background:var(--surface-2);}
+  .lf-name{min-width:0;}
+  .lf-name .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}
+  .lf-path{font-family:var(--mono);font-size:11px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .lf-sz{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:14px;white-space:nowrap;}
+  .btn-sm{padding:5px 11px;font-size:12px;border-radius:7px;}
+  .btn-trash{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,var(--rule));}
+  .btn-trash:hover{border-color:var(--amber);}
   .toast{position:fixed;right:22px;bottom:86px;z-index:20;max-width:380px;background:var(--surface);
     border:1px solid var(--rule);border-left:3px solid var(--cyan);border-radius:11px;padding:13px 16px;
     box-shadow:var(--shadow);transform:translateY(12px);opacity:0;pointer-events:none;transition:.25s;}
@@ -218,7 +237,13 @@
   <button id="refresh">↻ Rescan</button>
 </div>
 
-<div class="loading" id="loading"><span class="spin"></span> Scanning disk — walking large folders can take a few seconds…</div>
+<div class="loading" id="loading">
+  <div class="load-card">
+    <div class="load-title"><span class="spin"></span> Scanning your Mac…</div>
+    <div class="load-bar"><div class="load-fill" id="loadFill"></div></div>
+    <div class="load-label" id="loadLabel">Starting…</div>
+  </div>
+</div>
 
 <main id="main" hidden>
   <section class="hero">
@@ -236,8 +261,8 @@
   <div class="section-label"><span class="eyebrow">Cleanable · tick a group header to select all</span><span class="hr"></span></div>
   <div id="cats"></div>
 
-  <div class="section-label"><span class="eyebrow">Protected · real app data</span><span class="hr"></span></div>
-  <div id="info"></div>
+  <div class="section-label" id="lfLabel" hidden><span class="eyebrow">Large files · review individually</span><span class="hr"></span></div>
+  <div id="largefiles" hidden></div>
 
   <div class="section-label" id="mysqlLabel" hidden><span class="eyebrow">Databases · MySQL — permanent purge</span><span class="hr"></span></div>
   <div id="mysql" class="db-panel" hidden></div>
@@ -277,19 +302,37 @@ function countUp(el, toKb){
   })(start);
 }
 
-/* ── scan ── */
-async function scan(){
-  $('#loading').hidden=false; $('#main').hidden=true;
-  DATA=await (await fetch('/api/scan')).json();
+/* ── scan (streamed with live progress) ── */
+function setProgress(p){
+  const pct=p.total?Math.round(100*p.done/p.total):0;
+  $('#loadFill').style.width=pct+'%';
+  $('#loadLabel').textContent=p.label||'';
+}
+function afterScan(){
+  $('#loading').hidden=true; $('#main').hidden=false;
   $('#path').textContent=DATA.home;
   TOTAL_KB=DATA.categories.reduce((s,c)=>s+c.totalKb,0);
-  MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb)));
+  MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb)),1);
   render();
-  $('#loading').hidden=true; $('#main').hidden=false;
   countUp($('#heroBig'), TOTAL_KB);
   const items=DATA.categories.reduce((s,c)=>s+c.items.length,0);
   $('#heroSub').innerHTML=`across <b>${DATA.categories.length}</b> groups · <b>${items}</b> items`;
   renderTicks(); update();
+}
+function scan(){
+  $('#main').hidden=true; $('#loading').hidden=false;
+  setProgress({label:'Starting…',done:0,total:1});
+  let finished=false;
+  const fallback=async()=>{ if(finished)return; finished=true;
+    setProgress({label:'Scanning…',done:1,total:2});
+    DATA=await (await fetch('/api/scan')).json(); afterScan(); };
+  try{
+    const es=new EventSource('/api/scan/stream');
+    es.addEventListener('progress',e=>{ if(!finished) setProgress(JSON.parse(e.data)); });
+    es.addEventListener('result',e=>{ finished=true; DATA=JSON.parse(e.data); es.close(); afterScan(); });
+    es.addEventListener('scanerror',()=>{ es.close(); fallback(); });
+    es.onerror=()=>{ es.close(); fallback(); };
+  }catch{ fallback(); }
 }
 
 function render(){
@@ -337,19 +380,61 @@ function render(){
     wrap.appendChild(g);
   }
 
-  // info + mysql panels
-  const info=$('#info'); info.innerHTML='';
-  for(const grp of DATA.info){
-    const el=document.createElement('div'); el.className='prot';
-    el.innerHTML=`<h4>${grp.title}</h4><div class="note">Live application data — shown for context, cannot be cleaned here.</div>`+
-      grp.items.map(i=>`<div class="r"><span>${i.name}</span><span class="v">${humanStr(i.kb)}</span></div>`).join('');
-    info.appendChild(el);
-  }
-  // FEATURE: only surface the MySQL panel on Macs that actually have MySQL
+  // large files + mysql panels
+  renderLargeFiles();
+  // only surface the MySQL panel on Macs that actually have MySQL
   const hasDB = !!DATA.mysqlAvailable;
   $('#mysqlLabel').hidden = !hasDB;
   $('#mysql').hidden = !hasDB;
   if (hasDB) renderDB();
+}
+
+/* ── large files: review individually, with Reveal in Finder ── */
+function renderLargeFiles(){
+  const files = DATA.largeFiles || [];
+  const el=$('#largefiles');
+  $('#lfLabel').hidden = false; el.hidden = false; el.className='lf';
+  const note = files.length
+    ? `Biggest individual files in your home folder — your files, not caches, so review each.`
+    : (DATA.spotlight
+        ? `No files over 512&nbsp;MB found by the quick (Spotlight) search.`
+        : `Spotlight indexing is off, so the quick search found nothing. Run a deep scan to walk the disk directly.`);
+  const btn = files.length
+    ? `<button class="btn-sm" id="lfDeep">Deep scan ↻</button>`
+    : `<button class="btn-sm" id="lfDeep">Find large files (deep scan)</button>`;
+  el.innerHTML = `<div class="lf-note">${note} ${btn}</div>` +
+    files.map(f=>`
+      <div class="lf-row">
+        <div class="lf-name"><div class="nm" title="${f.path}">${f.name}</div><div class="lf-path">${f.path}</div></div>
+        <span class="lf-sz">${humanStr(f.kb)}</span>
+        <button class="btn-sm lf-reveal" data-path="${encodeURIComponent(f.path)}">Reveal ↗</button>
+        <button class="btn-sm btn-trash lf-trash" data-path="${encodeURIComponent(f.path)}" data-kb="${f.kb}">Trash</button>
+      </div>`).join('');
+  el.querySelectorAll('.lf-reveal').forEach(b=>b.addEventListener('click',()=>reveal(decodeURIComponent(b.dataset.path),b)));
+  el.querySelectorAll('.lf-trash').forEach(b=>b.addEventListener('click',()=>trashFile(decodeURIComponent(b.dataset.path),+b.dataset.kb,b)));
+  $('#lfDeep').addEventListener('click',deepScan);
+}
+async function deepScan(){
+  const b=$('#lfDeep'); b.disabled=true; b.textContent='Scanning the disk… (up to ~40s)';
+  try{
+    const r=await (await fetch('/api/large-files/deep')).json();
+    if(r.ok){ DATA.largeFiles=r.files; renderLargeFiles(); if(!r.files.length) toast('No files over 512 MB found.',5000); }
+    else throw 0;
+  }catch{ toast('✕ deep scan failed',5000,true); b.disabled=false; b.textContent='Find large files (deep scan)'; }
+}
+async function reveal(p,btn){
+  const old=btn.textContent; btn.textContent='Opening…';
+  const r=await (await fetch('/api/reveal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})})).json();
+  btn.textContent=old;
+  if(!r.ok) toast('✕ '+(r.error||'could not reveal in Finder'),5000,true);
+}
+async function trashFile(p,kb,btn){
+  if(!confirm(`Move this file to the Trash?\n\n${p}\n${humanStr(kb)}\n\nRecoverable from Trash until you empty it.`))return;
+  btn.disabled=true; btn.textContent='Moving…';
+  const res=await (await fetch('/api/clean',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:[p]})})).json();
+  const r=res.results&&res.results[0];
+  if(r&&r.ok){ toast(`<b>Moved to Trash</b> — freed ${humanStr(res.freedKb||0)}.`,7000); scan(); }
+  else { toast('✕ '+((r&&r.error)||'failed'),7000,true); btn.disabled=false; btn.textContent='Trash'; }
 }
 
 function refreshGroup(g){

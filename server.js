@@ -22,6 +22,62 @@ const HOME = os.homedir();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4567;
 const j = (...p) => path.join(HOME, ...p);
 
+// DEMO=1 serves synthetic data (for screenshots/docs) — no real disk is scanned.
+const DEMO = process.env.DEMO === '1';
+const DEMO_DATA = {
+  generatedAt: '2025-01-01T00:00:00.000Z', home: '/Users/alex', mysqlAvailable: true, spotlight: true,
+  categories: [
+    { id: 'dev-caches', title: 'Developer build caches', risk: 'safe',
+      desc: 'Package-manager and build caches (npm, Yarn, Gradle, Maven, Cargo, Go). Re-downloaded on demand.', totalKb: 19_100_000,
+      items: [
+        { name: 'Maven repository', kb: 12_100_000, path: '/Users/alex/.m2/repository', running: false, runVia: '' },
+        { name: 'Gradle caches', kb: 3_800_000, path: '/Users/alex/.gradle/caches', running: false, runVia: '' },
+        { name: 'Go modules', kb: 2_100_000, path: '/Users/alex/go/pkg/mod', running: false, runVia: '' },
+        { name: 'npm cache', kb: 1_100_000, path: '/Users/alex/.npm/_cacache', running: false, runVia: '' },
+      ] },
+    { id: 'user-caches', title: 'App caches  (~/Library/Caches)', risk: 'safe',
+      desc: 'Per-app caches. Apps rebuild these on next launch.', totalKb: 2_240_000,
+      items: [
+        { name: 'Chrome', kb: 1_310_000, path: '/Users/alex/Library/Caches/Google', running: true, runVia: 'chrome' },
+        { name: 'Slack', kb: 620_000, path: '/Users/alex/Library/Caches/com.tinyspeck.slackmacgap', running: true, runVia: 'slack' },
+        { name: 'Spotify', kb: 180_000, path: '/Users/alex/Library/Caches/com.spotify.client', running: false, runVia: '' },
+        { name: 'Figma', kb: 130_000, path: '/Users/alex/Library/Caches/com.figma.Desktop', running: false, runVia: '' },
+      ] },
+    { id: 'logs', title: 'App logs  (~/Library/Logs)', risk: 'safe',
+      desc: 'Application log files.', totalKb: 342_000,
+      items: [{ name: 'JetBrains', kb: 210_000, path: '/Users/alex/Library/Logs/JetBrains', running: false, runVia: '' },
+        { name: 'zoom.us', kb: 132_000, path: '/Users/alex/Library/Logs/zoom.us', running: false, runVia: '' }] },
+    { id: 'app-support', title: 'Application Support  (real app data!)', risk: 'review',
+      desc: 'Each app keeps its settings, databases and saved files here. Deleting a folder resets or WIPES that app — not junk, so review carefully.', totalKb: 24_600_000,
+      items: [
+        { name: 'Docker', kb: 9_100_000, path: '/Users/alex/Library/Application Support/Docker', running: false, runVia: '' },
+        { name: 'VirtualBox VMs', kb: 8_200_000, path: '/Users/alex/Library/Application Support/VirtualBox', running: true, runVia: 'virtualbox' },
+        { name: 'Postgres', kb: 5_100_000, path: '/Users/alex/Library/Application Support/Postgres', running: false, runVia: '' },
+        { name: 'Code', kb: 2_200_000, path: '/Users/alex/Library/Application Support/Code', running: true, runVia: 'code' },
+      ] },
+    { id: 'downloads', title: 'Downloads  (review each!)', risk: 'review',
+      desc: 'Your downloaded files. Nothing here is automatic — pick individually.', totalKb: 6_800_000,
+      items: [
+        { name: 'ubuntu-24.04.iso', kb: 5_200_000, path: '/Users/alex/Downloads/ubuntu-24.04.iso', running: false, runVia: '' },
+        { name: 'Xcode_16.dmg', kb: 1_400_000, path: '/Users/alex/Downloads/Xcode_16.dmg', running: false, runVia: '' },
+        { name: 'dataset.zip', kb: 200_000, path: '/Users/alex/Downloads/dataset.zip', running: false, runVia: '' },
+      ] },
+    { id: 'containers', title: 'Containers  (sandboxed app data)', risk: 'review',
+      desc: 'Sandboxed apps keep settings, state and sometimes documents here. Removing one resets that app.', totalKb: 3_200_000,
+      items: [
+        { name: 'Messaging app', kb: 1_900_000, path: '/Users/alex/Library/Containers/com.example.messages', running: true, runVia: 'messages' },
+        { name: 'Notes app', kb: 780_000, path: '/Users/alex/Library/Containers/com.example.notes', running: false, runVia: '' },
+      ] },
+  ],
+  largeFiles: [
+    { name: 'ubuntu-24.04.iso', kb: 5_200_000, path: '/Users/alex/Downloads/ubuntu-24.04.iso' },
+    { name: 'db-backup-2024.sql', kb: 3_400_000, path: '/Users/alex/backups/db-backup-2024.sql' },
+    { name: 'screen-recording.mov', kb: 2_600_000, path: '/Users/alex/Movies/screen-recording.mov' },
+    { name: 'Xcode_16.dmg', kb: 1_400_000, path: '/Users/alex/Downloads/Xcode_16.dmg' },
+    { name: 'project-archive.zip', kb: 900_000, path: '/Users/alex/Documents/project-archive.zip' },
+  ],
+};
+
 // ---------- fs helpers ----------
 function exists(p) { try { fs.lstatSync(p); return true; } catch { return false; } }
 function listChildren(dir) {
@@ -75,9 +131,9 @@ const CATEGORIES = [
   { id: 'ios-backups', title: 'iOS / iPadOS device backups', risk: 'review',
     desc: 'Local backups of iPhones/iPads (~/Library/Application Support/MobileSync). Often very large — keep only if you rely on local backups.',
     collect: () => listChildren(j('Library/Application Support/MobileSync/Backup')) },
-  { id: 'workbench-logs', title: 'MySQL Workbench logs', risk: 'safe',
-    desc: "Workbench's SQL-action history logs — client-side junk, not your DB data. Grows unbounded; Workbench recreates it.",
-    collect: () => listChildren(j('Library/Application Support/MySQL/Workbench/log')) },
+  { id: 'app-support', title: 'Application Support  (real app data!)', risk: 'review', run: true,
+    desc: 'Each app keeps its settings, databases and saved files here. Deleting a folder resets or WIPES that app — not junk, so review carefully. (Big individual files inside show up under Large files below for targeted cleanup.)',
+    collect: () => listChildren(j('Library/Application Support')).filter(p => path.basename(p) !== 'MobileSync') },
   { id: 'user-temp', title: 'User temp  ($TMPDIR)', risk: 'review',
     desc: 'Per-user temp files. A running app may be using some — close apps first.',
     collect: () => listChildren(os.tmpdir()) },
@@ -86,10 +142,6 @@ const CATEGORIES = [
     collect: () => listChildren(j('Downloads')) },
 ];
 
-// Read-only context: real application data, never cleanable from here.
-const INFO_ROOTS = [
-  { title: 'Application Support', dir: j('Library/Application Support') },
-];
 
 // ---------- running-app detection ----------
 // Build a set of running bundle IDs + significant words from app / process names.
@@ -146,17 +198,81 @@ function duSizes(paths, cb) {
   next();
 }
 
+function duSizesAsync(paths) {
+  return new Promise(resolve => duSizes(paths, resolve));
+}
+
+// ---------- large files ----------
+// Paths surfaced by the most recent large-file lookup, so they can be trashed
+// without re-walking the disk on every clean request.
+let LARGE_CACHE = new Set();
+const LARGE_MIN = 512 * 1024 * 1024; // 512 MB
+
+function statFiles(paths) {
+  const files = [];
+  for (const p of paths) {
+    if (!p) continue;
+    try {
+      const st = fs.statSync(p);
+      if (st.isFile()) files.push({ path: p, name: path.basename(p), kb: Math.round(st.size / 1024) });
+    } catch {}
+  }
+  files.sort((a, b) => b.kb - a.kb);
+  return files.slice(0, 40);
+}
+function spotlightOn() {
+  try { return /enabled/i.test(String(execFileSync('mdutil', ['-s', '/'], { timeout: 4000 }))); }
+  catch { return false; }
+}
+// Fast path: Spotlight index (instant when enabled — the default on macOS).
+function largeFilesSpotlight() {
+  let out = '';
+  try { out = String(execFileSync('mdfind', ['-onlyin', HOME, `kMDItemFSSize > ${LARGE_MIN}`],
+    { maxBuffer: 16 << 20, timeout: 8000 })); } catch {}
+  return statFiles(out.split('\n'));
+}
+// Opt-in deep path: walk the disk with `find`, pruning high-file-count dirs that
+// never hold big files. Time-boxed; returns partial results if it runs long.
+function largeFilesDeep() {
+  const args = [HOME,
+    '(', '-name', 'node_modules', '-o', '-name', '.git', '-o', '-name', 'Caches',
+    '-o', '-name', '*.photoslibrary',
+    '-o', '-path', `${HOME}/.m2`, '-o', '-path', `${HOME}/.gradle`, '-o', '-path', `${HOME}/.npm`,
+    '-o', '-path', `${HOME}/go`, '-o', '-path', `${HOME}/.cache`,
+    '-o', '-path', `${HOME}/Library/Developer/CoreSimulator`,
+    '-o', '-path', `${HOME}/Library/Group Containers`, ')', '-prune',
+    '-o', '-type', 'f', '-size', '+512M', '-print'];
+  let out = '';
+  try { out = String(execFileSync('find', args, { maxBuffer: 32 << 20, timeout: 40000, stdio: ['ignore', 'pipe', 'ignore'] })); }
+  catch (e) { out = (e.stdout && e.stdout.toString()) || ''; } // partial on timeout
+  return statFiles(out.split('\n'));
+}
+
 // ---------- scan ----------
-function buildScan(cb) {
+// Runs each phase in order, reporting progress via onProgress({label, done, total}).
+async function collectScan(onProgress) {
+  if (DEMO) {
+    const steps = ['Detecting running apps…', 'Scanning App caches…',
+      'Scanning Application Support…', 'Finding large files…', 'Done'];
+    steps.forEach((label, i) => onProgress && onProgress({ label, done: i, total: steps.length - 1 }));
+    LARGE_CACHE = new Set(DEMO_DATA.largeFiles.map(f => f.path));
+    return DEMO_DATA;
+  }
+  const catDefs = CATEGORIES.map(c => ({ cat: c, items: existing(c.collect()) }));
+  const total = 1 + catDefs.length + 1;   // running apps + each category + large files
+  let done = 0;
+  const tick = label => { if (onProgress) onProgress({ label, done, total }); };
+
+  tick('Detecting running apps…');
   const running = runningApps();
-  const catItems = CATEGORIES.map(c => ({ cat: c, items: existing(c.collect()) }));
-  const infoItems = INFO_ROOTS.map(r => ({ root: r, items: existing(listChildren(r.dir)) }));
-  const allPaths = [...catItems.flatMap(c => c.items), ...infoItems.flatMap(r => r.items)];
+  done++;
 
-  duSizes(allPaths, sizes => {
+  const categories = [];
+  for (const { cat, items } of catDefs) {
+    tick(`Scanning ${cat.title.replace(/\s+/g, ' ').trim()}…`);
+    const sizes = await duSizesAsync(items);
     const kb = p => sizes.get(p) || 0;
-
-    const categories = catItems.map(({ cat, items }) => ({
+    const built = {
       id: cat.id, title: cat.title, risk: cat.risk, desc: cat.desc,
       totalKb: items.reduce((s, p) => s + kb(p), 0),
       items: items.map(p => {
@@ -164,22 +280,28 @@ function buildScan(cb) {
         const run = cat.run ? itemRunning(name, running) : null;
         return { path: p, name, kb: kb(p), running: !!run, runVia: run || '' };
       }).sort((a, b) => b.kb - a.kb),
-    })).filter(c => c.items.length > 0);   // only show groups that apply to this Mac
+    };
+    done++;
+    if (built.items.length) categories.push(built);   // only groups that apply to this Mac
+  }
+  // safe groups first, then review; within a tier, largest first
+  const rank = r => (r === 'safe' ? 0 : 1);
+  categories.sort((a, b) => rank(a.risk) - rank(b.risk) || b.totalKb - a.totalKb);
 
-    const info = infoItems.map(({ root, items }) => ({
-      title: root.title, dir: root.dir,
-      items: items.map(p => ({ name: path.basename(p), kb: kb(p) }))
-        .sort((a, b) => b.kb - a.kb).slice(0, 12),
-    }));
+  tick('Finding large files…');
+  const large = largeFilesSpotlight();
+  LARGE_CACHE = new Set(large.map(f => f.path));
+  done++;
+  tick('Done');
 
-    cb({ generatedAt: new Date().toISOString(), home: HOME, categories, info,
-         mysqlAvailable: !!mysqlBin() });
-  });
+  return { generatedAt: new Date().toISOString(), home: HOME, categories,
+           largeFiles: large, spotlight: spotlightOn(), mysqlAvailable: !!mysqlBin() };
 }
 
 function allowedPaths() {
   const set = new Set();
   for (const c of CATEGORIES) for (const p of existing(c.collect())) set.add(p);
+  for (const p of LARGE_CACHE) set.add(p);   // allow trashing surfaced large files
   return set;
 }
 
@@ -279,9 +401,36 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && url === '/api/scan') {
-    try { buildScan(d => sendJSON(res, 200, d)); }
-    catch (e) { sendJSON(res, 500, { error: String(e && e.message || e) }); }
+    collectScan().then(d => sendJSON(res, 200, d))
+      .catch(e => sendJSON(res, 500, { error: String(e && e.message || e) }));
     return;
+  }
+
+  if (req.method === 'GET' && url === '/api/scan/stream') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive',
+    });
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    collectScan(p => send('progress', p))
+      .then(d => { send('result', d); res.end(); })
+      .catch(e => { send('scanerror', { error: String(e && e.message || e) }); res.end(); });
+    return;
+  }
+
+  if (req.method === 'GET' && url === '/api/large-files/deep') {
+    if (DEMO) return sendJSON(res, 200, { ok: true, files: DEMO_DATA.largeFiles });
+    const files = largeFilesDeep();
+    for (const f of files) LARGE_CACHE.add(f.path);
+    return sendJSON(res, 200, { ok: true, files });
+  }
+
+  if (req.method === 'POST' && url === '/api/reveal') {
+    return readBody(req, data => {
+      const p = data && data.path;
+      if (typeof p !== 'string' || !exists(p)) return sendJSON(res, 400, { ok: false, error: 'path not found' });
+      execFile('open', ['-R', p]);   // reveal in Finder (read-only)
+      sendJSON(res, 200, { ok: true });
+    });
   }
 
   if (req.method === 'POST' && url === '/api/clean') {
