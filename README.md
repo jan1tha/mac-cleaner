@@ -77,6 +77,12 @@ or drop anything itself; all cleaning stays in your hands via the UI.
 
 ## What it scans
 
+The categories are **generic macOS user-domain locations**, not tied to any one
+machine. All paths live under `~/Library`, `~/`, or `$TMPDIR`, which are stable
+across macOS versions. **Any group that resolves to zero items on your Mac is
+hidden**, so you only ever see the groups that actually apply (no Xcode → no Xcode
+groups; no iOS backups → no backups group; etc.).
+
 ### Cleanable → moved to `~/.Trash` (recoverable)
 
 | Group | Location | Risk |
@@ -84,23 +90,28 @@ or drop anything itself; all cleaning stays in your hands via the UI.
 | App updater leftovers | `~/Library/Caches/*.ShipIt` | safe |
 | App caches | `~/Library/Caches/*` | safe |
 | App logs | `~/Library/Logs/*` | safe |
+| Saved application state | `~/Library/Saved Application State/*` | safe |
+| Containers (sandboxed app data) | `~/Library/Containers/*` | review |
+| Developer build caches | npm / Yarn / pnpm / Gradle / Maven / Cargo / Go / CocoaPods / pip caches + Xcode `DerivedData`, `CoreSimulator/Caches` | safe |
+| Xcode device support & simulators | `iOS/watchOS/tvOS DeviceSupport`, `Archives`, `CoreSimulator/Devices` | review |
+| iOS / iPadOS device backups | `~/Library/Application Support/MobileSync/Backup/*` | review |
 | MySQL Workbench logs | `~/Library/Application Support/MySQL/Workbench/log/*` | safe |
-| Developer build caches | `~/.m2/repository`, `~/.gradle/caches`, `~/.npm/_cacache`, `~/.cache`, `~/go/pkg/mod`, Xcode `DerivedData`, `CoreSimulator/Caches` | safe |
-| Xcode iOS DeviceSupport | `~/Library/Developer/Xcode/iOS DeviceSupport/*` | review |
 | User temp | `$TMPDIR/*` | review |
 | Downloads | `~/Downloads/*` | review |
 
-`safe` = regenerated automatically. `review` = reclaimable, but check first.
+`safe` = regenerated automatically. `review` = reclaimable, but check first
+(Containers and backups are real app data — deleting resets the app / removes the backup).
 
 ### Read-only info (never cleanable)
 
-`~/Library/Application Support/*` and `~/Library/Containers/*` — real application
-data, shown only so you can see where the big space goes.
+`~/Library/Application Support/*` — real application data, shown only so you can
+see where the big space goes.
 
-### Databases (MySQL)
+### Databases (MySQL) — shown only if MySQL is installed
 
-A connect form → lists every schema with its size (from `information_schema`) and
-table count → select and `DROP DATABASE`.
+If a `mysql` client is present, a panel appears: connect → lists every schema with
+its size (from `information_schema`) and table count → select and `DROP DATABASE`.
+On Macs without MySQL, the panel is hidden entirely.
 
 ---
 

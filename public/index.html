@@ -236,11 +236,11 @@
   <div class="section-label"><span class="eyebrow">Cleanable · tick a group header to select all</span><span class="hr"></span></div>
   <div id="cats"></div>
 
-  <div class="section-label"><span class="eyebrow">Databases · MySQL — permanent purge</span><span class="hr"></span></div>
-  <div id="mysql" class="db-panel"></div>
-
   <div class="section-label"><span class="eyebrow">Protected · real app data</span><span class="hr"></span></div>
   <div id="info"></div>
+
+  <div class="section-label" id="mysqlLabel" hidden><span class="eyebrow">Databases · MySQL — permanent purge</span><span class="hr"></span></div>
+  <div id="mysql" class="db-panel" hidden></div>
 </main>
 
 <div class="dock">
@@ -345,7 +345,11 @@ function render(){
       grp.items.map(i=>`<div class="r"><span>${i.name}</span><span class="v">${humanStr(i.kb)}</span></div>`).join('');
     info.appendChild(el);
   }
-  renderDB();
+  // FEATURE: only surface the MySQL panel on Macs that actually have MySQL
+  const hasDB = !!DATA.mysqlAvailable;
+  $('#mysqlLabel').hidden = !hasDB;
+  $('#mysql').hidden = !hasDB;
+  if (hasDB) renderDB();
 }
 
 function refreshGroup(g){
