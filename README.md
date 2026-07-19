@@ -253,4 +253,4 @@ mac-cleaner/
 
 ## License
 
-[MIT](./LICENSE) © Janitha Senevirathna
+[Apache License 2.0](./LICENSE) © 2026 Janitha Senevirathna
