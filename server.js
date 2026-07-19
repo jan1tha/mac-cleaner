@@ -237,6 +237,7 @@ function readBody(req, cb) {
 }
 
 const INDEX = fs.readFileSync(path.join(__dirname, 'public', 'index.html'));
+const FAVICON = fs.readFileSync(path.join(__dirname, 'public', 'favicon.svg'));
 
 const server = http.createServer((req, res) => {
   const url = req.url.split('?')[0];
@@ -244,6 +245,11 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(INDEX);
+  }
+
+  if (req.method === 'GET' && (url === '/favicon.svg' || url === '/favicon.ico')) {
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'max-age=86400' });
+    return res.end(FAVICON);
   }
 
   if (req.method === 'GET' && url === '/api/scan') {

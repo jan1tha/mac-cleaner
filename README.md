@@ -55,6 +55,24 @@ PORT=8080 node server.js
 
 Stop it with `Ctrl-C`.
 
+### One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jan1tha/mac-cleaner/main/install.sh | bash
+```
+
+Clones (if needed) and launches — no sudo, no dependencies, nothing deleted.
+
+### Install with an AI agent 🤖
+
+Hand your coding agent (Claude Code, Cursor, etc.) this repo's link and say:
+
+> **"Install this on my Mac: https://github.com/jan1tha/mac-cleaner"**
+
+The agent reads [`AGENTS.md`](./AGENTS.md), checks you have Node, starts the server,
+and tells you the URL. It's instructed to **set up only** — it won't delete, move,
+or drop anything itself; all cleaning stays in your hands via the UI.
+
 ---
 
 ## What it scans
