@@ -194,9 +194,21 @@
   .loading{max-width:1000px;margin:0 auto;padding:70px 22px;display:flex;justify-content:center;}
   .load-card{width:min(540px,92vw);background:var(--surface);border:1px solid var(--rule);border-radius:16px;box-shadow:var(--shadow);padding:22px 24px;}
   .load-title{display:flex;align-items:center;gap:11px;font-weight:600;font-size:15px;margin-bottom:16px;}
+  .load-count{margin-left:auto;color:var(--ink-faint);font-size:12px;font-weight:500;}
   .load-bar{height:9px;border-radius:6px;background:var(--surface-2);border:1px solid var(--rule);overflow:hidden;}
   .load-fill{height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--cyan-deep),var(--cyan));box-shadow:0 0 16px -2px var(--cyan);transition:width .3s cubic-bezier(.22,.61,.36,1);}
   .load-label{margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--ink-dim);}
+  /* scan checklist */
+  .load-list{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:340px;overflow:auto;}
+  .ld-item{display:flex;align-items:center;gap:11px;padding:5px 4px;font-size:13px;border-radius:7px;transition:color .2s,background .2s;}
+  .ld-ic{width:16px;height:16px;flex:none;display:grid;place-items:center;}
+  .ld-ic::before{content:"";width:11px;height:11px;border-radius:50%;border:1.5px solid var(--rule);box-sizing:border-box;}
+  .ld-item.pending{color:var(--ink-faint);}
+  .ld-item.active{color:var(--ink);background:color-mix(in srgb,var(--cyan) 7%,transparent);}
+  .ld-item.active .ld-ic::before{width:13px;height:13px;border:2px solid var(--rule);border-top-color:var(--cyan);animation:sp .7s linear infinite;}
+  .ld-item.done{color:var(--ink-dim);}
+  .ld-item.done .ld-ic::before{content:"✓";border:none;width:auto;height:auto;color:var(--green);font-weight:800;font-size:13px;line-height:1;}
+  .ld-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .spin{width:15px;height:15px;border:2px solid var(--rule);border-top-color:var(--cyan);border-radius:50%;animation:sp .7s linear infinite;flex:none;}
   @keyframes sp{to{transform:rotate(360deg);}}
 
@@ -240,9 +252,10 @@
 
 <div class="loading" id="loading">
   <div class="load-card">
-    <div class="load-title"><span class="spin"></span> Scanning your Mac…</div>
+    <div class="load-title"><span class="spin"></span> Scanning your Mac… <span class="load-count mono" id="loadCount"></span></div>
     <div class="load-bar"><div class="load-fill" id="loadFill"></div></div>
-    <div class="load-label" id="loadLabel">Starting…</div>
+    <ul class="load-list" id="loadList"></ul>
+    <div class="load-label" id="loadLabel" hidden></div>
   </div>
 </div>
 
@@ -303,11 +316,30 @@ function countUp(el, toKb){
   })(start);
 }
 
-/* ── scan (streamed with live progress) ── */
-function setProgress(p){
-  const pct=p.total?Math.round(100*p.done/p.total):0;
-  $('#loadFill').style.width=pct+'%';
-  $('#loadLabel').textContent=p.label||'';
+/* ── scan (streamed with a live checklist) ── */
+let LOAD_TOTAL=0, LOAD_DONE=0;
+function resetLoad(){
+  LOAD_TOTAL=0; LOAD_DONE=0;
+  $('#loadList').innerHTML=''; $('#loadCount').textContent='';
+  $('#loadFill').style.width='0%';
+  const l=$('#loadLabel'); l.hidden=true; l.textContent='';
+}
+function setLoadBar(){
+  $('#loadFill').style.width=(LOAD_TOTAL?100*LOAD_DONE/LOAD_TOTAL:0)+'%';
+  $('#loadCount').textContent=LOAD_TOTAL?`${LOAD_DONE}/${LOAD_TOTAL}`:'';
+}
+function onScanEvent(ev){
+  if(ev.type==='plan'){
+    LOAD_TOTAL=ev.steps.length; LOAD_DONE=0;
+    $('#loadList').innerHTML=ev.steps.map(s=>
+      `<li class="ld-item pending" data-key="${s.key}"><span class="ld-ic"></span><span class="ld-label">${s.label}</span></li>`).join('');
+    setLoadBar();
+  } else if(ev.type==='start'){
+    const li=$('#loadList').querySelector(`[data-key="${ev.key}"]`); if(li) li.className='ld-item active';
+  } else if(ev.type==='done'){
+    const li=$('#loadList').querySelector(`[data-key="${ev.key}"]`); if(li) li.className='ld-item done';
+    LOAD_DONE++; setLoadBar();
+  }
 }
 function afterScan(){
   $('#loading').hidden=true; $('#main').hidden=false;
@@ -324,17 +356,19 @@ function afterScan(){
 function setHeroValue(kb){ const h=human(kb); $('#heroBig').innerHTML=`${h.v} <span class="unit">${h.u}</span>`; }
 function scan(){
   $('#main').hidden=true; $('#loading').hidden=false;
-  setProgress({label:'Starting…',done:0,total:1});
+  resetLoad();
   let finished=false;
   const fallback=async()=>{ if(finished)return; finished=true;
-    setProgress({label:'Scanning…',done:1,total:2});
+    $('#loadList').innerHTML=''; const l=$('#loadLabel'); l.hidden=false;
+    l.textContent='Scanning… (restart the app — “node server.js” — for step-by-step progress)';
+    $('#loadFill').style.width='45%';
     DATA=await (await fetch('/api/scan')).json(); afterScan(); };
   try{
     const es=new EventSource('/api/scan/stream');
-    es.addEventListener('progress',e=>{ if(!finished) setProgress(JSON.parse(e.data)); });
+    es.addEventListener('progress',e=>{ if(!finished) onScanEvent(JSON.parse(e.data)); });
     es.addEventListener('result',e=>{ finished=true; DATA=JSON.parse(e.data); es.close(); afterScan(); });
-    es.addEventListener('scanerror',()=>{ es.close(); fallback(); });
-    es.onerror=()=>{ es.close(); fallback(); };
+    es.addEventListener('scanerror',()=>{ es.close(); if(!finished) fallback(); });
+    es.onerror=()=>{ es.close(); if(!finished) fallback(); };
   }catch{ fallback(); }
 }
 

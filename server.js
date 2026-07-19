@@ -254,62 +254,70 @@ function largeFilesDeep() {
 }
 
 // ---------- scan ----------
-// Runs each phase in order, reporting progress via onProgress({label, done, total}).
-async function collectScan(onProgress) {
+// Emits a checklist the UI renders: one step per thing being scanned.
+//   {type:'plan', steps:[{key,label}]}   {type:'start', key}   {type:'done', key}
+async function collectScan(emit) {
+  const say = o => { if (emit) emit(o); };
+
   if (DEMO) {
-    const steps = ['Detecting running apps…', 'Scanning App caches…',
-      'Scanning Application Support…', 'Finding large files…', 'Done'];
-    steps.forEach((label, i) => onProgress && onProgress({ label, done: i, total: steps.length - 1 }));
+    const steps = [{ key: 'running', label: 'Detecting running apps' },
+      ...DEMO_DATA.categories.map(c => ({ key: c.id, label: c.title.replace(/\s+/g, ' ').trim() })),
+      { key: 'large', label: 'Finding large files' }];
+    say({ type: 'plan', steps });
+    steps.forEach(s => { say({ type: 'start', key: s.key }); say({ type: 'done', key: s.key }); });
     LARGE_CACHE = new Set(DEMO_DATA.largeFiles.map(f => f.path));
     return DEMO_DATA;
   }
-  const catDefs = CATEGORIES.map(c => ({ cat: c, items: existing(c.collect()) }));
-  const total = 1 + catDefs.length + 1;   // running apps + each category + large files
-  let done = 0;
-  const tick = label => { if (onProgress) onProgress({ label, done, total }); };
 
-  tick('Detecting running apps…');
+  // Only groups that actually have items appear — in the checklist and the result.
+  const catDefs = CATEGORIES.map(c => ({ cat: c, items: existing(c.collect()) }))
+    .filter(d => d.items.length > 0);
+
+  const steps = [{ key: 'running', label: 'Detecting running apps' },
+    ...catDefs.map(d => ({ key: d.cat.id, label: d.cat.title.replace(/\s+/g, ' ').trim() })),
+    { key: 'large', label: 'Finding large files' }];
+  say({ type: 'plan', steps });
+
+  say({ type: 'start', key: 'running' });
   const running = runningApps();
-  done++;
+  say({ type: 'done', key: 'running' });
 
-  // Size every group concurrently — wall-clock ≈ the slowest group, not the sum.
-  tick(`Sizing ${catDefs.length} groups…`);
-  let sized = 0;
+  // Size every group concurrently — they all start, then tick off as each finishes.
+  catDefs.forEach(d => say({ type: 'start', key: d.cat.id }));
   const built = await Promise.all(catDefs.map(async ({ cat, items }) => {
+    let group;
     if (cat.lazy) {   // don't walk it now — the client measures it in the background
-      sized++; done++;
-      tick(`Sizing groups… ${sized}/${catDefs.length}`);
-      return {
+      group = {
         id: cat.id, title: cat.title, risk: cat.risk, desc: cat.desc, lazy: true, totalKb: null,
         items: items.map(p => ({ path: p, name: path.basename(p), kb: null, lazy: true, running: false, runVia: '' })),
       };
+    } else {
+      const sizes = await duSizesAsync(items);
+      const kb = p => sizes.get(p) || 0;
+      group = {
+        id: cat.id, title: cat.title, risk: cat.risk, desc: cat.desc,
+        totalKb: items.reduce((s, p) => s + kb(p), 0),
+        items: items.map(p => {
+          const name = path.basename(p);
+          const run = cat.run ? itemRunning(name, running) : null;
+          return { path: p, name, kb: kb(p), running: !!run, runVia: run || '' };
+        }).sort((a, b) => b.kb - a.kb),
+      };
     }
-    const sizes = await duSizesAsync(items);
-    sized++; done++;
-    tick(`Sizing groups… ${sized}/${catDefs.length}`);
-    const kb = p => sizes.get(p) || 0;
-    return {
-      id: cat.id, title: cat.title, risk: cat.risk, desc: cat.desc,
-      totalKb: items.reduce((s, p) => s + kb(p), 0),
-      items: items.map(p => {
-        const name = path.basename(p);
-        const run = cat.run ? itemRunning(name, running) : null;
-        return { path: p, name, kb: kb(p), running: !!run, runVia: run || '' };
-      }).sort((a, b) => b.kb - a.kb),
-    };
+    say({ type: 'done', key: cat.id });
+    return group;
   }));
-  const categories = built.filter(c => c.items.length > 0);   // only groups that apply to this Mac
+
   // safe groups first, then review; within a tier, largest first
   const rank = r => (r === 'safe' ? 0 : 1);
-  categories.sort((a, b) => rank(a.risk) - rank(b.risk) || b.totalKb - a.totalKb);
+  built.sort((a, b) => rank(a.risk) - rank(b.risk) || (b.totalKb || 0) - (a.totalKb || 0));
 
-  tick('Finding large files…');
+  say({ type: 'start', key: 'large' });
   const large = largeFilesSpotlight();
   LARGE_CACHE = new Set(large.map(f => f.path));
-  done++;
-  tick('Done');
+  say({ type: 'done', key: 'large' });
 
-  return { generatedAt: new Date().toISOString(), home: HOME, categories,
+  return { generatedAt: new Date().toISOString(), home: HOME, categories: built,
            largeFiles: large, spotlight: spotlightOn(), mysqlAvailable: !!mysqlBin() };
 }
 

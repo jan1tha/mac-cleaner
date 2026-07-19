@@ -160,8 +160,9 @@ you queue items, with a live "X GB queued" readout. Tick marks show group
 boundaries.
 
 **Live scan progress.** The scan streams over Server-Sent Events; the loading card
-shows a progress bar and the current phase ("Scanning App caches…"). Falls back to
-a plain request if SSE is unavailable.
+shows a **checklist** of exactly what's being scanned — green ✓ for done, a spinner
+for in-progress, a dim circle for pending — plus a progress bar and `done/total`
+counter. Falls back to a plain request if SSE is unavailable.
 
 **Running-app detection.** Built from `lsappinfo list` (running bundle IDs + app
 names) and `ps` (process names) — no permission prompt. Matching is limited to
