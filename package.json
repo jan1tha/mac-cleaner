@@ -1,0 +1,28 @@
+{
+  "name": "mac-cleaner",
+  "version": "1.0.0",
+  "description": "A tiny local web app to scan and selectively clean macOS temp/cache/junk locations, flag running apps, and inspect/purge MySQL schemas.",
+  "main": "server.js",
+  "bin": {
+    "mac-cleaner": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "macos",
+    "cleaner",
+    "disk-space",
+    "cache",
+    "temp",
+    "mysql",
+    "cli",
+    "local"
+  ],
+  "author": "Janitha Senevirathna",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

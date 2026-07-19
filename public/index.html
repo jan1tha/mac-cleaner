@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Disk Reclaim</title>
+<style>
+  /* ── instrument-readout identity ───────────────────────────────
+     mono numerics · hairline rules · cyan(reclaim)+amber(review)+red(permanent) */
+  :root{
+    --ink:#e9edf4; --ink-dim:#8b95a7; --ink-faint:#59616f;
+    --bg:#0a0c11; --surface:#0f131a; --surface-2:#141922; --rule:#20272f;
+    --cyan:#2fd4c4; --cyan-deep:#16a99b; --amber:#e6a338; --green:#4bcf8e;
+    --red:#e5595f; --red-deep:#c33a40;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 12px 40px -18px rgba(0,0,0,.8);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --ink:#12161c; --ink-dim:#5a6472; --ink-faint:#9aa3b1;
+      --bg:#eef0f3; --surface:#ffffff; --surface-2:#f6f8fb; --rule:#e2e6ec;
+      --cyan-deep:#0e938a; --shadow:0 1px 0 rgba(255,255,255,.6), 0 14px 40px -22px rgba(20,30,50,.35);
+    }
+  }
+  *{box-sizing:border-box;}
+  [hidden]{display:none!important;}   /* beat author display rules */
+  html,body{margin:0;}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(120% 80% at 50% -10%, color-mix(in srgb,var(--cyan) 6%,transparent), transparent 60%);}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--ink-faint);}
+
+  .bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;
+    padding:13px 22px;background:color-mix(in srgb,var(--bg) 82%,transparent);
+    backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--rule);}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:.02em;}
+  .brand .glyph{width:22px;height:22px;display:grid;place-items:center;color:var(--cyan);}
+  .brand .glyph svg{width:22px;height:22px;}
+  .path{font-family:var(--mono);font-size:12px;color:var(--ink-dim);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40vw;}
+  .grow{flex:1;}
+  button{font:inherit;cursor:pointer;color:var(--ink);border-radius:9px;
+    border:1px solid var(--rule);background:var(--surface-2);padding:7px 13px;
+    transition:border-color .15s,background .15s,transform .05s,filter .15s;}
+  button:hover{border-color:color-mix(in srgb,var(--cyan) 60%,var(--rule));}
+  button:active{transform:translateY(1px);}
+  button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;}
+  button:disabled{opacity:.4;cursor:not-allowed;transform:none;}
+  .btn-go{background:linear-gradient(180deg,var(--cyan),var(--cyan-deep));
+    border-color:transparent;color:#04211f;font-weight:650;box-shadow:0 8px 22px -10px var(--cyan-deep);}
+  .btn-go:hover{filter:brightness(1.06);border-color:transparent;}
+  .btn-danger{background:linear-gradient(180deg,var(--red),var(--red-deep));
+    border-color:transparent;color:#fff;font-weight:650;box-shadow:0 8px 22px -10px var(--red-deep);}
+  .btn-danger:hover{filter:brightness(1.06);border-color:transparent;}
+
+  main{max-width:1000px;margin:0 auto;padding:26px 22px 120px;}
+
+  /* hero + reclaim meter */
+  .hero{padding:6px 4px 22px;}
+  .hero .eyebrow{margin-bottom:10px;}
+  .readout{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;}
+  .readout .big{font-family:var(--mono);font-weight:600;letter-spacing:-.03em;
+    font-size:clamp(46px,9vw,78px);line-height:.92;}
+  .readout .unit{font-size:.46em;color:var(--ink-dim);letter-spacing:.02em;margin-left:-.12em;
+    vertical-align:.14em;font-weight:500;}
+  .readout .sub{color:var(--ink-dim);font-size:13px;}
+  .readout .sub b{color:var(--ink);font-weight:600;}
+  .meter{margin-top:22px;}
+  .meter .track{position:relative;height:16px;border-radius:9px;overflow:hidden;
+    background:var(--surface-2);border:1px solid var(--rule);}
+  .meter .fill{position:absolute;inset:0 auto 0 0;width:0;
+    background:linear-gradient(90deg,var(--cyan-deep),var(--cyan));
+    box-shadow:0 0 18px -2px var(--cyan);border-radius:9px 0 0 9px;
+    transition:width .5s cubic-bezier(.22,.61,.36,1);}
+  .meter .ticks{position:absolute;inset:0;pointer-events:none;}
+  .meter .tick{position:absolute;top:0;bottom:0;width:1px;background:var(--rule);}
+  .meter .legend{display:flex;align-items:center;gap:8px;margin-top:11px;font-size:12px;color:var(--ink-dim);}
+  .meter .legend .q{font-family:var(--mono);color:var(--cyan);font-weight:600;}
+  .meter .legend .dot{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan);}
+
+  .section-label{display:flex;align-items:center;gap:12px;margin:30px 2px 12px;}
+  .section-label .eyebrow{white-space:nowrap;}
+  .section-label .hr{flex:1;height:1px;background:var(--rule);}
+
+  /* group cards */
+  .group{background:var(--surface);border:1px solid var(--rule);border-radius:14px;
+    box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden;}
+  .g-head{display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;
+    gap:14px;padding:15px 18px;cursor:pointer;user-select:none;}
+  .g-head:hover{background:var(--surface-2);}
+  .risk{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);
+    font-size:10px;letter-spacing:.14em;text-transform:uppercase;min-width:66px;}
+  .risk .d{width:8px;height:8px;border-radius:50%;}
+  .risk.safe{color:var(--green);}   .risk.safe .d{background:var(--green);box-shadow:0 0 9px var(--green);}
+  .risk.review{color:var(--amber);} .risk.review .d{background:var(--amber);box-shadow:0 0 9px var(--amber);}
+  .g-titlewrap{min-width:0;}
+  .g-title{font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+  .g-desc{color:var(--ink-dim);font-size:12.5px;margin-top:2px;}
+  .g-right{display:flex;align-items:center;gap:14px;}
+  .g-size{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:15px;text-align:right;}
+  .g-count{font-family:var(--mono);font-size:11px;color:var(--ink-faint);}
+  .caret{color:var(--ink-faint);transition:transform .18s ease;}
+  .group.open .caret{transform:rotate(90deg);color:var(--cyan);}
+
+  .run-badge{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent);
+    border:1px solid color-mix(in srgb,var(--amber) 45%,transparent);border-radius:999px;padding:1px 8px;}
+
+  .body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease;}
+  .group.open .body{grid-template-rows:1fr;}
+  .body-inner{overflow:hidden;border-top:1px solid var(--rule);}
+  .row{display:grid;grid-template-columns:auto 1fr 120px auto;align-items:center;
+    gap:14px;padding:9px 18px;border-top:1px solid var(--rule);position:relative;}
+  .row:first-of-type{border-top:none;}
+  .row:hover{background:var(--surface-2);}
+  .row.on{background:color-mix(in srgb,var(--cyan) 8%,transparent);}
+  .row.on::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--cyan);box-shadow:0 0 10px var(--cyan);}
+  .name{display:flex;align-items:center;gap:9px;min-width:0;}
+  .name .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .run-pill{flex:none;font-family:var(--mono);font-size:10px;letter-spacing:.06em;
+    color:var(--amber);border:1px solid color-mix(in srgb,var(--amber) 45%,transparent);
+    border-radius:999px;padding:0 7px;display:inline-flex;align-items:center;gap:5px;}
+  .run-pill::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--amber);box-shadow:0 0 7px var(--amber);}
+  .prop{height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden;}
+  .prop i{display:block;height:100%;background:var(--ink-faint);border-radius:3px;}
+  .row.on .prop i{background:var(--cyan);}
+  .sz{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-dim);text-align:right;font-size:13px;}
+  .empty{padding:16px 18px;color:var(--ink-faint);font-family:var(--mono);font-size:12px;}
+
+  input[type=checkbox]{appearance:none;width:17px;height:17px;border-radius:5px;flex:none;
+    border:1.5px solid var(--rule);background:var(--surface-2);cursor:pointer;display:grid;place-items:center;transition:.12s;}
+  input[type=checkbox]:hover{border-color:var(--cyan);}
+  input[type=checkbox]:checked{background:var(--cyan);border-color:var(--cyan);}
+  input[type=checkbox]:checked::after{content:"";width:5px;height:9px;margin-top:-2px;border:solid #04211f;border-width:0 2px 2px 0;transform:rotate(43deg);}
+  input[type=checkbox]:indeterminate{background:var(--cyan);border-color:var(--cyan);}
+  input[type=checkbox]:indeterminate::after{content:"";width:9px;height:2px;background:#04211f;}
+  input[type=checkbox]:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;}
+  input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
+
+  /* MySQL panel */
+  .db-panel{background:var(--surface);border:1px solid var(--rule);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:12px;}
+  .db-intro{padding:16px 18px;color:var(--ink-dim);font-size:13px;border-bottom:1px solid var(--rule);}
+  .db-intro b{color:var(--ink);}
+  .db-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:16px 18px;}
+  .fld{display:flex;flex-direction:column;gap:5px;}
+  .fld label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);}
+  .fld input{font:inherit;font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--rule);border-radius:8px;padding:8px 10px;min-width:0;}
+  .fld input:focus{outline:none;border-color:var(--cyan);}
+  .fld.host input{width:130px;} .fld.port input{width:74px;} .fld.user input{width:120px;} .fld.pass input{width:150px;}
+  .db-err{padding:0 18px 14px;color:var(--red);font-size:12.5px;font-family:var(--mono);}
+  .db-total{display:flex;align-items:baseline;gap:12px;padding:14px 18px;border-bottom:1px solid var(--rule);}
+  .db-total .n{font-family:var(--mono);font-weight:650;font-size:22px;letter-spacing:-.02em;}
+  .db-total .l{color:var(--ink-dim);font-size:12.5px;}
+  .db-total .who{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-faint);}
+  .db-row{display:grid;grid-template-columns:auto 1fr 150px auto;align-items:center;gap:14px;
+    padding:10px 18px;border-top:1px solid var(--rule);}
+  .db-row:hover{background:var(--surface-2);}
+  .db-name{display:flex;align-items:center;gap:9px;min-width:0;}
+  .db-name .nm{font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .db-tables{font-family:var(--mono);font-size:11px;color:var(--ink-faint);}
+  .tag-sys{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-faint);border:1px solid var(--rule);border-radius:999px;padding:1px 7px;}
+  .db-row.sys{opacity:.6;}
+  .db-dock{display:flex;align-items:center;gap:14px;padding:14px 18px;border-top:1px solid var(--rule);
+    background:color-mix(in srgb,var(--red) 6%,transparent);}
+  .db-dock .warn{font-size:11.5px;color:var(--red);display:flex;align-items:center;gap:6px;}
+  .db-dock .sel{font-family:var(--mono);font-size:13px;color:var(--ink-dim);}
+
+  /* protected read-only */
+  .prot{background:transparent;border:1px dashed var(--rule);border-radius:14px;padding:16px 18px;margin-bottom:12px;}
+  .prot h4{margin:0 0 3px;font-size:13px;font-weight:600;}
+  .prot .note{color:var(--ink-faint);font-size:11.5px;margin-bottom:10px;}
+  .prot .r{display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid var(--rule);color:var(--ink-dim);}
+  .prot .r:first-of-type{border-top:none;}
+  .prot .r .v{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+
+  /* sticky dock */
+  .dock{position:fixed;left:0;right:0;bottom:0;z-index:10;background:color-mix(in srgb,var(--bg) 84%,transparent);
+    backdrop-filter:saturate(1.4) blur(12px);border-top:1px solid var(--rule);}
+  .dock-inner{max-width:1000px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;gap:16px;}
+  .queued{display:flex;flex-direction:column;line-height:1.15;}
+  .queued .n{font-family:var(--mono);font-weight:650;font-size:20px;font-variant-numeric:tabular-nums;}
+  .queued .l{font-size:11px;color:var(--ink-dim);}
+  .safe-note{font-size:11.5px;color:var(--ink-faint);display:flex;align-items:center;gap:6px;}
+
+  .loading{max-width:1000px;margin:0 auto;padding:80px 22px;color:var(--ink-dim);display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:13px;}
+  .spin{width:15px;height:15px;border:2px solid var(--rule);border-top-color:var(--cyan);border-radius:50%;animation:sp .7s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+  .toast{position:fixed;right:22px;bottom:86px;z-index:20;max-width:380px;background:var(--surface);
+    border:1px solid var(--rule);border-left:3px solid var(--cyan);border-radius:11px;padding:13px 16px;
+    box-shadow:var(--shadow);transform:translateY(12px);opacity:0;pointer-events:none;transition:.25s;}
+  .toast.show{transform:none;opacity:1;}
+  .toast.danger{border-left-color:var(--red);}
+
+  @media (max-width:640px){
+    .path{display:none;} .g-desc{display:none;}
+    .row{grid-template-columns:auto 1fr auto;} .prop{display:none;}
+    .db-row{grid-template-columns:auto 1fr auto;} .db-row .prop{display:none;}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="brand">
+    <span class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l1.6 11.2A2 2 0 0 0 6.6 20h10.8a2 2 0 0 0 2-1.8L21 7"/><path d="M2 7h20"/><path d="M9 4h6l1 3H8z"/></svg></span>
+    Disk Reclaim
+  </div>
+  <span class="path mono" id="path"></span>
+  <span class="grow"></span>
+  <button id="refresh">↻ Rescan</button>
+</div>
+
+<div class="loading" id="loading"><span class="spin"></span> Scanning disk — walking large folders can take a few seconds…</div>
+
+<main id="main" hidden>
+  <section class="hero">
+    <div class="eyebrow">Reclaimable space</div>
+    <div class="readout">
+      <div class="big mono" id="heroBig">0 <span class="unit">B</span></div>
+      <div class="sub" id="heroSub"></div>
+    </div>
+    <div class="meter">
+      <div class="track"><div class="ticks" id="ticks"></div><div class="fill" id="fill"></div></div>
+      <div class="legend"><span class="dot"></span> <span class="q" id="legendQ">0 B</span> queued to Trash <span id="legendPct" style="color:var(--ink-faint)"></span></div>
+    </div>
+  </section>
+
+  <div class="section-label"><span class="eyebrow">Cleanable · tick a group header to select all</span><span class="hr"></span></div>
+  <div id="cats"></div>
+
+  <div class="section-label"><span class="eyebrow">Databases · MySQL — permanent purge</span><span class="hr"></span></div>
+  <div id="mysql" class="db-panel"></div>
+
+  <div class="section-label"><span class="eyebrow">Protected · real app data</span><span class="hr"></span></div>
+  <div id="info"></div>
+</main>
+
+<div class="dock">
+  <div class="dock-inner">
+    <div class="queued"><span class="n mono" id="dockN">0 items</span><span class="l">selected to move to Trash</span></div>
+    <span class="grow"></span>
+    <span class="safe-note">↩ recoverable — restored from Trash until you empty it</span>
+    <button class="btn-go" id="clean" disabled>Move to Trash</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let DATA=null, TOTAL_KB=0, MAX_ITEM_KB=1;
+const reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+function human(kb){
+  let b=kb*1024, u=['B','KB','MB','GB','TB'], i=0;
+  while(b>=1024&&i<u.length-1){b/=1024;i++;}
+  return {v:String((b>=100||i===0)?Math.round(b):b.toFixed(1)), u:u[i]};
+}
+const humanStr = kb => { const h=human(kb); return h.v+' '+h.u; };
+const humanB   = bytes => humanStr(bytes/1024);
+
+function countUp(el, toKb){
+  if(reduce){const h=human(toKb);el.innerHTML=`${h.v} <span class="unit">${h.u}</span>`;return;}
+  const start=performance.now(), dur=650;
+  (function step(t){
+    const k=Math.min(1,(t-start)/dur), e=1-Math.pow(1-k,3), h=human(toKb*e);
+    el.innerHTML=`${h.v} <span class="unit">${h.u}</span>`;
+    if(k<1) requestAnimationFrame(step);
+  })(start);
+}
+
+/* ── scan ── */
+async function scan(){
+  $('#loading').hidden=false; $('#main').hidden=true;
+  DATA=await (await fetch('/api/scan')).json();
+  $('#path').textContent=DATA.home;
+  TOTAL_KB=DATA.categories.reduce((s,c)=>s+c.totalKb,0);
+  MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb)));
+  render();
+  $('#loading').hidden=true; $('#main').hidden=false;
+  countUp($('#heroBig'), TOTAL_KB);
+  const items=DATA.categories.reduce((s,c)=>s+c.items.length,0);
+  $('#heroSub').innerHTML=`across <b>${DATA.categories.length}</b> groups · <b>${items}</b> items`;
+  renderTicks(); update();
+}
+
+function render(){
+  const wrap=$('#cats'); wrap.innerHTML='';
+  for(const c of DATA.categories){
+    const running=c.items.filter(i=>i.running).length;
+    const g=document.createElement('div'); g.className='group';
+    const rows=c.items.map(it=>`
+      <label class="row" data-run="${it.running?1:0}">
+        <input type="checkbox" class="pick" data-path="${encodeURIComponent(it.path)}" data-kb="${it.kb}">
+        <span class="name"><span class="nm" title="${it.path}">${it.name}</span>${it.running?`<span class="run-pill" title="Owning app appears to be running (${it.runVia})">running</span>`:''}</span>
+        <span class="prop"><i style="width:${Math.max(3,Math.round(100*it.kb/MAX_ITEM_KB))}%"></i></span>
+        <span class="sz">${humanStr(it.kb)}</span>
+      </label>`).join('');
+    g.innerHTML=`
+      <div class="g-head">
+        <input type="checkbox" class="gpick" title="Select all in this group" ${c.items.length?'':'disabled'}>
+        <span class="risk ${c.risk}"><span class="d"></span>${c.risk}</span>
+        <div class="g-titlewrap">
+          <div class="g-title">${c.title}${running?`<span class="run-badge">${running} running</span>`:''}</div>
+          <div class="g-desc">${c.desc}</div>
+        </div>
+        <div class="g-right">
+          <span class="g-count">${c.items.length} items</span>
+          <span class="g-size">${humanStr(c.totalKb)}</span>
+          <span class="caret">▸</span>
+        </div>
+      </div>
+      <div class="body"><div class="body-inner">${rows||'<div class="empty">Nothing here</div>'}</div></div>`;
+
+    // expand on header click (but not when hitting the group checkbox)
+    g.querySelector('.g-head').addEventListener('click',e=>{
+      if(e.target.classList.contains('gpick')) return;
+      g.classList.toggle('open');
+    });
+    // FEATURE 1: group checkbox selects the whole group without expanding
+    const gp=g.querySelector('.gpick');
+    gp.addEventListener('change',()=>{
+      g.querySelectorAll('.pick').forEach(cb=>{cb.checked=gp.checked;cb.closest('.row').classList.toggle('on',cb.checked);});
+      update();
+    });
+    g.querySelectorAll('.pick').forEach(cb=>cb.addEventListener('change',()=>{
+      cb.closest('.row').classList.toggle('on',cb.checked); refreshGroup(g); update();
+    }));
+    wrap.appendChild(g);
+  }
+
+  // info + mysql panels
+  const info=$('#info'); info.innerHTML='';
+  for(const grp of DATA.info){
+    const el=document.createElement('div'); el.className='prot';
+    el.innerHTML=`<h4>${grp.title}</h4><div class="note">Live application data — shown for context, cannot be cleaned here.</div>`+
+      grp.items.map(i=>`<div class="r"><span>${i.name}</span><span class="v">${humanStr(i.kb)}</span></div>`).join('');
+    info.appendChild(el);
+  }
+  renderDB();
+}
+
+function refreshGroup(g){
+  const picks=[...g.querySelectorAll('.pick')];
+  const on=picks.filter(c=>c.checked).length, gp=g.querySelector('.gpick');
+  gp.checked = on>0 && on===picks.length;
+  gp.indeterminate = on>0 && on<picks.length;
+}
+
+function renderTicks(){
+  const t=$('#ticks'); t.innerHTML=''; let acc=0;
+  for(const c of DATA.categories){
+    acc+=c.totalKb; if(acc>=TOTAL_KB) break;
+    const d=document.createElement('div'); d.className='tick'; d.style.left=(100*acc/TOTAL_KB)+'%'; t.appendChild(d);
+  }
+}
+
+function selectedRows(){ return [...document.querySelectorAll('.pick:checked')]; }
+function update(){
+  const rows=selectedRows(), kb=rows.reduce((a,cb)=>a+ +cb.dataset.kb,0);
+  const pct=TOTAL_KB?100*kb/TOTAL_KB:0;
+  $('#fill').style.width=pct+'%';
+  $('#legendQ').textContent=humanStr(kb);
+  $('#legendPct').textContent=rows.length?`· ${pct<1?pct.toFixed(1):Math.round(pct)}% of reclaimable`:'';
+  $('#dockN').textContent=`${rows.length} ${rows.length===1?'item':'items'} · ${humanStr(kb)}`;
+  $('#clean').disabled=rows.length===0;
+}
+
+function toast(html,ms=8000,danger=false){
+  const t=$('#toast'); t.className='toast'+(danger?' danger':''); t.innerHTML=html;
+  requestAnimationFrame(()=>t.classList.add('show'));
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),ms);
+}
+
+$('#refresh').addEventListener('click',scan);
+$('#clean').addEventListener('click',async()=>{
+  const rows=selectedRows(); if(!rows.length)return;
+  const kb=rows.reduce((a,cb)=>a+ +cb.dataset.kb,0);
+  const running=rows.filter(cb=>cb.closest('.row').dataset.run==='1').length;
+  let msg=`Move ${rows.length} item(s) — ${humanStr(kb)} — to the Trash?\n\nRecoverable: restore from Trash anytime, empty Trash later to reclaim the space.`;
+  if(running) msg+=`\n\n⚠️  ${running} of these belong to apps that appear to be RUNNING. Quit those apps first so their caches rebuild cleanly.`;
+  if(!confirm(msg))return;
+  const btn=$('#clean'); btn.disabled=true; btn.textContent='Moving…';
+  const res=await (await fetch('/api/clean',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({paths:rows.map(cb=>decodeURIComponent(cb.dataset.path))})})).json();
+  const ok=res.results.filter(x=>x.ok).length, fail=res.results.filter(x=>!x.ok);
+  let out=`<b>Moved ${ok} item${ok===1?'':'s'} to Trash</b> — freed ${humanStr(res.freedKb||0)}.`;
+  if(fail.length) out+=`<br><span style="color:var(--amber)">${fail.length} skipped:</span> ${fail.slice(0,2).map(f=>f.error).join(', ')}`;
+  toast(out,10000);
+  btn.textContent='Move to Trash';
+  await scan();
+});
+
+/* ── FEATURE 3: MySQL inspect & purge ── */
+let MYSQL_CREDS=null, SCHEMAS=[];
+function renderDB(){
+  const p=$('#mysql');
+  if(!MYSQL_CREDS){
+    p.innerHTML=`
+      <div class="db-intro">Connect to the running <b>MySQL</b> server to see each schema's size and selectively purge. Sizes come straight from <span class="mono">information_schema</span>. Credentials are used only for this session and never stored.</div>
+      <form class="db-form" id="dbForm">
+        <div class="fld host"><label>Host</label><input id="dbHost" value="127.0.0.1"></div>
+        <div class="fld port"><label>Port</label><input id="dbPort" value="3306"></div>
+        <div class="fld user"><label>User</label><input id="dbUser" value="root"></div>
+        <div class="fld pass"><label>Password</label><input id="dbPass" type="password" placeholder="••••••••"></div>
+        <button type="submit" id="dbConnect">Connect</button>
+      </form>
+      <div class="db-err" id="dbErr" hidden></div>`;
+    $('#dbForm').addEventListener('submit',async e=>{
+      e.preventDefault();
+      const creds={host:$('#dbHost').value.trim(),port:$('#dbPort').value.trim(),
+        user:$('#dbUser').value.trim(),password:$('#dbPass').value};
+      const btn=$('#dbConnect'); btn.disabled=true; btn.textContent='Connecting…';
+      const r=await (await fetch('/api/mysql/schemas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(creds)})).json();
+      btn.disabled=false; btn.textContent='Connect';
+      if(!r.ok){ const e2=$('#dbErr'); e2.hidden=false; e2.textContent='✕ '+r.error; return; }
+      MYSQL_CREDS=creds; SCHEMAS=r.schemas; renderDB();
+    });
+    return;
+  }
+  // connected view
+  const maxB=Math.max(1,...SCHEMAS.map(s=>s.bytes));
+  const totalB=SCHEMAS.reduce((a,s)=>a+s.bytes,0);
+  const userDB=SCHEMAS.filter(s=>!s.system).length;
+  p.innerHTML=`
+    <div class="db-total">
+      <span class="n mono">${humanB(totalB)}</span>
+      <span class="l">across ${SCHEMAS.length} schemas · ${userDB} purgeable</span>
+      <span class="who">${MYSQL_CREDS.user}@${MYSQL_CREDS.host}:${MYSQL_CREDS.port}</span>
+    </div>
+    ${SCHEMAS.map((s,i)=>`
+      <div class="db-row ${s.system?'sys':''}">
+        <input type="checkbox" class="dbpick" data-db="${encodeURIComponent(s.name)}" ${s.system?'disabled':''}>
+        <span class="db-name"><span class="nm">${s.name}</span>${s.system?'<span class="tag-sys">system</span>':`<span class="db-tables">${s.tables} tables</span>`}</span>
+        <span class="prop"><i style="width:${Math.max(3,Math.round(100*s.bytes/maxB))}%;background:${s.system?'var(--ink-faint)':'var(--red)'}"></i></span>
+        <span class="sz">${humanB(s.bytes)}</span>
+      </div>`).join('')}
+    <div class="db-dock">
+      <span class="sel" id="dbSel">0 selected</span>
+      <span class="grow"></span>
+      <span class="warn">⚠ DROP DATABASE — permanent, not moved to Trash</span>
+      <button class="btn-danger" id="dbPurge" disabled>Purge schemas</button>
+    </div>`;
+  p.querySelectorAll('.dbpick').forEach(cb=>cb.addEventListener('change',dbUpdate));
+  $('#dbPurge').addEventListener('click',dbPurge);
+  dbUpdate();
+}
+function dbSelected(){ return [...document.querySelectorAll('.dbpick:checked')].map(cb=>decodeURIComponent(cb.dataset.db)); }
+function dbUpdate(){
+  const sel=dbSelected();
+  const bytes=SCHEMAS.filter(s=>sel.includes(s.name)).reduce((a,s)=>a+s.bytes,0);
+  $('#dbSel').textContent=`${sel.length} selected · ${humanB(bytes)}`;
+  $('#dbPurge').disabled=sel.length===0;
+}
+async function dbPurge(){
+  const dbs=dbSelected(); if(!dbs.length)return;
+  const bytes=SCHEMAS.filter(s=>dbs.includes(s.name)).reduce((a,s)=>a+s.bytes,0);
+  if(!confirm(`PERMANENTLY DROP ${dbs.length} database(s) — ${humanB(bytes)}?\n\n${dbs.join(', ')}\n\nThis is NOT moved to Trash and CANNOT be undone.`))return;
+  const typed=prompt(`Final check. Type  PURGE  to drop: ${dbs.join(', ')}`);
+  if(typed!=='PURGE'){ toast('Purge cancelled.',4000); return; }
+  const btn=$('#dbPurge'); btn.disabled=true; btn.textContent='Dropping…';
+  const r=await (await fetch('/api/mysql/drop',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({},MYSQL_CREDS,{databases:dbs,confirm:true}))})).json();
+  if(!r.ok){ toast('✕ '+r.error,8000,true); btn.disabled=false; btn.textContent='Purge schemas'; return; }
+  const ok=r.results.filter(x=>x.ok), fail=r.results.filter(x=>!x.ok);
+  let out=`<b>Dropped ${ok.length} database${ok.length===1?'':'s'}</b> permanently.`;
+  if(fail.length) out+=`<br><span style="color:var(--amber)">${fail.length} refused:</span> ${fail.slice(0,2).map(f=>f.db+' — '+f.error).join('; ')}`;
+  toast(out,10000,true);
+  // refresh schema list
+  const rr=await (await fetch('/api/mysql/schemas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(MYSQL_CREDS)})).json();
+  if(rr.ok) SCHEMAS=rr.schemas;
+  renderDB();
+}
+
+scan();
+</script>
+</body>
+</html>
