@@ -267,12 +267,15 @@ async function collectScan(onProgress) {
   const running = runningApps();
   done++;
 
-  const categories = [];
-  for (const { cat, items } of catDefs) {
-    tick(`Scanning ${cat.title.replace(/\s+/g, ' ').trim()}…`);
+  // Size every group concurrently — wall-clock ≈ the slowest group, not the sum.
+  tick(`Sizing ${catDefs.length} groups…`);
+  let sized = 0;
+  const built = await Promise.all(catDefs.map(async ({ cat, items }) => {
     const sizes = await duSizesAsync(items);
+    sized++; done++;
+    tick(`Sizing groups… ${sized}/${catDefs.length}`);
     const kb = p => sizes.get(p) || 0;
-    const built = {
+    return {
       id: cat.id, title: cat.title, risk: cat.risk, desc: cat.desc,
       totalKb: items.reduce((s, p) => s + kb(p), 0),
       items: items.map(p => {
@@ -281,9 +284,8 @@ async function collectScan(onProgress) {
         return { path: p, name, kb: kb(p), running: !!run, runVia: run || '' };
       }).sort((a, b) => b.kb - a.kb),
     };
-    done++;
-    if (built.items.length) categories.push(built);   // only groups that apply to this Mac
-  }
+  }));
+  const categories = built.filter(c => c.items.length > 0);   // only groups that apply to this Mac
   // safe groups first, then review; within a tier, largest first
   const rank = r => (r === 'safe' ? 0 : 1);
   categories.sort((a, b) => rank(a.risk) - rank(b.risk) || b.totalKb - a.totalKb);
