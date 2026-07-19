@@ -115,7 +115,8 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 | App caches | `~/Library/Caches/*` | safe |
 | App logs | `~/Library/Logs/*` | safe |
 | Saved application state | `~/Library/Saved Application State/*` | safe |
-| Developer build caches | npm / Yarn / pnpm / Gradle / Maven / Cargo / Go / CocoaPods / pip caches + Xcode `DerivedData`, `CoreSimulator/Caches` | safe |
+| Developer build caches | npm / Yarn / pnpm / Gradle / Cargo / Go / CocoaPods / pip caches + Xcode `DerivedData`, `CoreSimulator/Caches` | safe |
+| Maven repository | `~/.m2/repository` | review |
 | Containers (sandboxed app data) | `~/Library/Containers/*` | review |
 | Application Support | `~/Library/Application Support/*` (excl. `MobileSync`) | review |
 | Xcode device support & simulators | `iOS/watchOS/tvOS DeviceSupport`, `Archives`, `CoreSimulator/Devices` | review |
@@ -125,7 +126,15 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 
 `safe` = regenerated automatically. `review` = reclaimable, but check first —
 **Containers and Application Support are real app data**, so deleting a folder
-resets or wipes that app (still recoverable from Trash).
+resets or wipes that app (still recoverable from Trash). The **Maven repository**
+is `review` because clearing it makes every project re-download its dependencies
+on the next build (slow, needs network).
+
+> **Deferred sizing.** The Maven repo has tens of thousands of tiny files and is
+> slow to measure (there's no stored directory size on macOS — `du` must walk it).
+> So the scan skips it and returns immediately; its size is measured in the
+> background (`POST /api/size`) and fills in a moment later. This cut the warm scan
+> from ~21s to ~4s here.
 
 ### Large files
 
@@ -199,6 +208,7 @@ Node HTTP server (server.js, 127.0.0.1 only, built-ins only)
 | `GET /api/scan` | — | Full scan JSON: categories (sizes + running flags), `largeFiles`, `spotlight`, `mysqlAvailable`. |
 | `GET /api/scan/stream` | — | Same, as SSE: `progress` events `{label, done, total}` then a `result` event. |
 | `POST /api/clean` | `{ paths: [...] }` | Per-path result; each path validated against the allow-list, then `mv`d to Trash. |
+| `POST /api/size` | `{ paths: [...] }` | `{ sizes: { path: kb } }` — on-demand `du` for deferred (lazy) groups. |
 | `GET /api/large-files/deep` | — | `{ ok, files }` — biggest files via a pruned `find` walk. |
 | `POST /api/reveal` | `{ path }` | Reveals the path in Finder (`open -R`); read-only. |
 | `POST /api/mysql/schemas` | `{ host, port, user, password }` | `{ ok, schemas: [{ name, bytes, tables, system }] }`. |

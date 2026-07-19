@@ -131,6 +131,7 @@
   .prop i{display:block;height:100%;background:var(--ink-faint);border-radius:3px;}
   .row.on .prop i{background:var(--cyan);}
   .sz{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-dim);text-align:right;font-size:13px;}
+  .sz-lazy{color:var(--ink-faint);font-style:italic;}
   .empty{padding:16px 18px;color:var(--ink-faint);font-family:var(--mono);font-size:12px;}
 
   input[type=checkbox]{appearance:none;width:17px;height:17px;border-radius:5px;flex:none;
@@ -311,14 +312,16 @@ function setProgress(p){
 function afterScan(){
   $('#loading').hidden=true; $('#main').hidden=false;
   $('#path').textContent=DATA.home;
-  TOTAL_KB=DATA.categories.reduce((s,c)=>s+c.totalKb,0);
-  MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb)),1);
+  TOTAL_KB=DATA.categories.reduce((s,c)=>s+(c.totalKb||0),0);
+  MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb||0)),1);
   render();
   countUp($('#heroBig'), TOTAL_KB);
   const items=DATA.categories.reduce((s,c)=>s+c.items.length,0);
   $('#heroSub').innerHTML=`across <b>${DATA.categories.length}</b> groups · <b>${items}</b> items`;
   renderTicks(); update();
+  measureLazy();   // fill in sizes for deferred (lazy) groups without blocking the scan
 }
+function setHeroValue(kb){ const h=human(kb); $('#heroBig').innerHTML=`${h.v} <span class="unit">${h.u}</span>`; }
 function scan(){
   $('#main').hidden=true; $('#loading').hidden=false;
   setProgress({label:'Starting…',done:0,total:1});
@@ -339,14 +342,20 @@ function render(){
   const wrap=$('#cats'); wrap.innerHTML='';
   for(const c of DATA.categories){
     const running=c.items.filter(i=>i.running).length;
-    const g=document.createElement('div'); g.className='group';
-    const rows=c.items.map(it=>`
+    const g=document.createElement('div'); g.className='group'; g.dataset.cat=c.id;
+    const rows=c.items.map(it=>{
+      const lazy = it.lazy && it.kb==null;
+      const sz = lazy ? '<span class="sz sz-lazy">measuring…</span>' : `<span class="sz">${humanStr(it.kb)}</span>`;
+      const w = Math.max(3, Math.round(100*(it.kb||0)/MAX_ITEM_KB));
+      return `
       <label class="row" data-run="${it.running?1:0}">
-        <input type="checkbox" class="pick" data-path="${encodeURIComponent(it.path)}" data-kb="${it.kb}">
+        <input type="checkbox" class="pick" data-path="${encodeURIComponent(it.path)}" data-kb="${it.kb||0}">
         <span class="name"><span class="nm" title="${it.path}">${it.name}</span>${it.running?`<span class="run-pill" title="Owning app appears to be running (${it.runVia})">running</span>`:''}</span>
-        <span class="prop"><i style="width:${Math.max(3,Math.round(100*it.kb/MAX_ITEM_KB))}%"></i></span>
-        <span class="sz">${humanStr(it.kb)}</span>
-      </label>`).join('');
+        <span class="prop"><i style="width:${w}%"></i></span>
+        ${sz}
+      </label>`;
+    }).join('');
+    const gsize = c.totalKb==null ? '<span class="g-size sz-lazy">measuring…</span>' : `<span class="g-size">${humanStr(c.totalKb)}</span>`;
     g.innerHTML=`
       <div class="g-head">
         <input type="checkbox" class="gpick" title="Select all in this group" ${c.items.length?'':'disabled'}>
@@ -357,7 +366,7 @@ function render(){
         </div>
         <div class="g-right">
           <span class="g-count">${c.items.length} items</span>
-          <span class="g-size">${humanStr(c.totalKb)}</span>
+          ${gsize}
           <span class="caret">▸</span>
         </div>
       </div>
@@ -437,6 +446,34 @@ async function trashFile(p,kb,btn){
   else { toast('✕ '+((r&&r.error)||'failed'),7000,true); btn.disabled=false; btn.textContent='Trash'; }
 }
 
+/* ── background sizing for lazy (deferred) groups like the Maven repo ── */
+async function measureLazy(){
+  const paths=[];
+  DATA.categories.forEach(c=>c.items.forEach(i=>{ if(i.lazy && i.kb==null) paths.push(i.path); }));
+  if(!paths.length) return;
+  let r; try{ r=await (await fetch('/api/size',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths})})).json(); }catch{ return; }
+  const sizes=r.sizes||{};
+  DATA.categories.forEach(c=>{
+    let touched=false;
+    c.items.forEach(i=>{ if(i.lazy && sizes[i.path]!=null){ i.kb=sizes[i.path]; i.lazy=false; touched=true; } });
+    if(touched) c.totalKb=c.items.reduce((s,i)=>s+(i.kb||0),0);
+  });
+  TOTAL_KB=DATA.categories.reduce((s,c)=>s+(c.totalKb||0),0);
+  MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb||0)),1);
+  // patch rows + checkboxes in place (keeps selections/expansion intact)
+  document.querySelectorAll('.pick').forEach(cb=>{
+    const p=decodeURIComponent(cb.dataset.path);
+    if(sizes[p]!=null){ cb.dataset.kb=sizes[p];
+      const sz=cb.closest('.row').querySelector('.sz'); if(sz){ sz.textContent=humanStr(sizes[p]); sz.classList.remove('sz-lazy'); } }
+  });
+  DATA.categories.forEach(c=>{
+    const g=document.querySelector(`.group[data-cat="${c.id}"]`);
+    const gs=g&&g.querySelector('.g-size');
+    if(gs && c.totalKb!=null){ gs.textContent=humanStr(c.totalKb); gs.classList.remove('sz-lazy'); }
+  });
+  setHeroValue(TOTAL_KB); renderTicks(); update();
+}
+
 function refreshGroup(g){
   const picks=[...g.querySelectorAll('.pick')];
   const on=picks.filter(c=>c.checked).length, gp=g.querySelector('.gpick');
@@ -447,7 +484,7 @@ function refreshGroup(g){
 function renderTicks(){
   const t=$('#ticks'); t.innerHTML=''; let acc=0;
   for(const c of DATA.categories){
-    acc+=c.totalKb; if(acc>=TOTAL_KB) break;
+    acc+=(c.totalKb||0); if(acc>=TOTAL_KB) break;
     const d=document.createElement('div'); d.className='tick'; d.style.left=(100*acc/TOTAL_KB)+'%'; t.appendChild(d);
   }
 }
