@@ -25,7 +25,14 @@ const j = (...p) => path.join(HOME, ...p);
 // DEMO=1 serves synthetic data (for screenshots/docs) — no real disk is scanned.
 const DEMO = process.env.DEMO === '1';
 const DEMO_DATA = {
-  generatedAt: '2025-01-01T00:00:00.000Z', home: '/Users/alex', mysqlAvailable: true, spotlight: true,
+  generatedAt: '2025-01-01T00:00:00.000Z', home: '/Users/alex', mysqlAvailable: true, dockerInstalled: true, spotlight: true,
+  disk: { totalKb: 524_288_000, usedKb: 429_916_160, freeKb: 94_371_840 },
+  docker: [
+    { id: '4c556b690142', name: 'opensearchproject/opensearch-dashboards:latest', size: '3GB', sizeBytes: 3.0e9, lastUsed: Date.parse('2025-01-01'), running: false, inUse: true, containers: ['opensearch-dashboards'], state: 'stopped' },
+    { id: '160bd2f6a348', name: 'sonarqube:community', size: '2.5GB', sizeBytes: 2.5e9, lastUsed: Date.parse('2025-01-06'), running: true, inUse: true, containers: ['sonarqube'], state: 'running' },
+    { id: '919ff4e7d0d5', name: 'opensearchproject/opensearch:latest', size: '2.28GB', sizeBytes: 2.28e9, lastUsed: Date.parse('2025-01-01'), running: false, inUse: true, containers: ['opensearch-node'], state: 'stopped' },
+    { id: '23ca0f137965', name: 'sonarsource/sonar-scanner-cli:latest', size: '1.71GB', sizeBytes: 1.71e9, lastUsed: null, running: false, inUse: false, containers: [], state: 'orphaned' },
+  ],
   categories: [
     { id: 'workbench-logs', title: 'MySQL Workbench logs', risk: 'safe',
       desc: "Workbench's SQL-action activity logs — client-side junk, NOT your database data. Grows unbounded; Workbench just recreates it. Shown separately from real app data.", totalKb: 31_800_000,
@@ -275,6 +282,21 @@ function largeFilesDeep() {
   return statFiles(out.split('\n'));
 }
 
+// ---------- disk capacity ----------
+// Whole-disk usage for the startup volume. On APFS the boot ("/") volume's own
+// "Used" is misleadingly tiny (system data lives on a sibling volume sharing the
+// container), so real usage is total − available for the shared container.
+function diskUsage() {
+  try {
+    const out = String(execFileSync('df', ['-P', '-k', '/'], { timeout: 5000 }));
+    const cols = out.trim().split('\n').pop().split(/\s+/);
+    const totalKb = parseInt(cols[1], 10);
+    const availKb = parseInt(cols[3], 10);
+    if (!totalKb || isNaN(availKb)) return null;
+    return { totalKb, freeKb: availKb, usedKb: totalKb - availKb };
+  } catch { return null; }
+}
+
 // ---------- scan ----------
 // Emits a checklist the UI renders: one step per thing being scanned.
 //   {type:'plan', steps:[{key,label}]}   {type:'start', key}   {type:'done', key}
@@ -340,7 +362,8 @@ async function collectScan(emit) {
   say({ type: 'done', key: 'large' });
 
   return { generatedAt: new Date().toISOString(), home: HOME, categories: built,
-           largeFiles: large, spotlight: spotlightOn(), mysqlAvailable: !!mysqlBin() };
+           largeFiles: large, spotlight: spotlightOn(), mysqlAvailable: !!mysqlBin(),
+           dockerInstalled: !!dockerBin(), disk: diskUsage() };
 }
 
 function allowedPaths() {
@@ -415,6 +438,98 @@ function mysqlDrop(creds, databases) {
     }
   }
   return results;
+}
+
+// ---------- Docker ----------
+// Images live inside a Linux VM (Colima / Docker Desktop / etc.) and are
+// re-pulled on demand, so removal is treated as a permanent-but-recoverable
+// action (like re-downloading), separate from the Trash flow. "Last used" is
+// inferred from the most recent start/finish of any container built on the
+// image, since Docker doesn't stamp images with a usage time.
+function dockerBin() {
+  const cands = ['/opt/homebrew/bin/docker', '/usr/local/bin/docker', '/usr/bin/docker'];
+  for (const c of cands) if (exists(c)) return c;
+  for (const dir of String(process.env.PATH || '').split(':')) {
+    if (dir && exists(path.join(dir, 'docker'))) return path.join(dir, 'docker');
+  }
+  return null;
+}
+function parseDockerSize(s) {
+  const m = parseFloat(s) || 0;
+  if (/GB/i.test(s)) return m * 1e9;
+  if (/MB/i.test(s)) return m * 1e6;
+  if (/kB/i.test(s)) return m * 1e3;
+  return m;
+}
+function dockerRun(args, timeout) {
+  const bin = dockerBin();
+  if (!bin) throw new Error('Docker is not installed on this Mac');
+  return String(execFileSync(bin, args, { timeout: timeout || 15000, maxBuffer: 16 << 20, stdio: ['ignore', 'pipe', 'pipe'] }));
+}
+function dockerServerVersion() {
+  try { return dockerRun(['version', '--format', '{{.Server.Version}}'], 6000).trim(); } catch { return null; }
+}
+function dockerImages() {
+  if (!dockerBin()) throw new Error('Docker is not installed on this Mac');
+  const ver = dockerServerVersion();
+  if (!ver) throw new Error('Docker is installed but the daemon is not running — start it (e.g. “colima start”) and retry');
+
+  const imgOut = dockerRun(['images', '--format', '{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}'], 15000);
+  const images = imgOut.split('\n').filter(Boolean).map(l => {
+    const [id, name, size] = l.split('\t');
+    return { id, name: (name || '').includes('<none>') ? `<untagged ${id}>` : name, size, sizeBytes: parseDockerSize(size) };
+  });
+
+  // Map each image to the containers built on it, for state + last-used.
+  let ctrs = [];
+  const ids = dockerRun(['ps', '-aq'], 10000).split('\n').filter(Boolean);
+  if (ids.length) {
+    const fmt = '{{.Config.Image}}\t{{.Image}}\t{{.State.Status}}\t{{.State.StartedAt}}\t{{.State.FinishedAt}}\t{{.Name}}';
+    ctrs = dockerRun(['inspect', '-f', fmt, ...ids], 20000).split('\n').filter(Boolean).map(line => {
+      const [img, imgid, status, started, finished, cname] = line.split('\t');
+      return { img, imgid: (imgid || '').replace('sha256:', '').slice(0, 12), status, started, finished, cname: (cname || '').replace(/^\//, '') };
+    });
+  }
+  const t = s => (!s || String(s).startsWith('0001')) ? 0 : Date.parse(s) || 0;
+
+  const out = images.map(im => {
+    const rel = ctrs.filter(c => c.img === im.name || c.imgid === im.id);
+    let lastUsed = 0, running = false; const containers = [];
+    for (const c of rel) { lastUsed = Math.max(lastUsed, t(c.started), t(c.finished)); if (c.status === 'running') running = true; containers.push(c.cname); }
+    return {
+      id: im.id, name: im.name, size: im.size, sizeBytes: im.sizeBytes,
+      lastUsed: lastUsed || null, running, inUse: rel.length > 0, containers,
+      state: running ? 'running' : (rel.length ? 'stopped' : 'orphaned'),
+    };
+  }).sort((a, b) => b.sizeBytes - a.sizeBytes);
+
+  return { serverVersion: ver, images: out };
+}
+function dockerRemove(ids, removeContainers) {
+  const { images } = dockerImages();            // also re-validates the daemon is up
+  const find = id => images.find(i => i.id === id || id.startsWith(i.id) || i.id.startsWith(id));
+  const results = [];
+  let freedBytes = 0;
+  for (const id of ids) {
+    if (typeof id !== 'string' || !/^[a-f0-9]{6,64}$/i.test(id)) { results.push({ id, ok: false, error: 'invalid image id' }); continue; }
+    const im = find(id);
+    if (im && im.running) { results.push({ id, ok: false, error: `in use by a running container (${im.containers.join(', ')}) — stop it first` }); continue; }
+    try {
+      // Optionally clear the stopped containers that pin the image (never a
+      // running one — those images are refused above).
+      if (removeContainers && im && im.inUse) {
+        const cids = dockerRun(['ps', '-aq', '--filter', `ancestor=${im.name}`], 10000).split('\n').filter(Boolean);
+        if (cids.length) dockerRun(['rm', ...cids], 20000);
+      }
+      dockerRun(['rmi', id], 30000);
+      freedBytes += im ? im.sizeBytes : 0;
+      results.push({ id, ok: true });
+    } catch (e) {
+      const msg = (e.stderr && e.stderr.toString().trim()) || e.message || String(e);
+      results.push({ id, ok: false, error: msg.split('\n')[0].replace(/^Error(?: response from daemon)?:\s*/i, '') });
+    }
+  }
+  return { results, freedBytes };
 }
 
 // ---------- http ----------
@@ -504,6 +619,23 @@ const server = http.createServer((req, res) => {
         } catch (e) { results.push({ path: p, ok: false, error: String(e && e.message || e) }); }
       }
       sendJSON(res, 200, { freedKb, results });
+    });
+  }
+
+  if (req.method === 'GET' && url === '/api/docker/images') {
+    if (DEMO) return sendJSON(res, 200, { ok: true, serverVersion: '27.0.0 (demo)', images: DEMO_DATA.docker });
+    try { const d = dockerImages(); sendJSON(res, 200, { ok: true, serverVersion: d.serverVersion, images: d.images }); }
+    catch (e) { sendJSON(res, 200, { ok: false, error: String(e && e.message || e) }); }
+    return;
+  }
+
+  if (req.method === 'POST' && url === '/api/docker/remove') {
+    return readBody(req, data => {
+      if (!data || !Array.isArray(data.ids) || data.confirm !== true)
+        return sendJSON(res, 400, { error: 'ids[] and confirm:true required' });
+      if (DEMO) return sendJSON(res, 200, { ok: true, results: data.ids.map(id => ({ id, ok: true })), freedBytes: 0 });
+      try { const r = dockerRemove(data.ids, !!data.removeContainers); sendJSON(res, 200, { ok: true, results: r.results, freedBytes: r.freedBytes }); }
+      catch (e) { sendJSON(res, 200, { ok: false, error: String(e && e.message || e).split('\n')[0] }); }
     });
   }
 

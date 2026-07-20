@@ -64,6 +64,34 @@
   /* hero + reclaim meter */
   .hero{padding:6px 4px 22px;}
   .hero .eyebrow{margin-bottom:10px;}
+
+  /* startup-disk capacity strip — segmented, macOS-Storage style */
+  .disk{padding:14px 16px;margin:0 0 22px;background:var(--surface);
+    border:1px solid var(--rule);border-radius:12px;box-shadow:var(--shadow);}
+  .disk-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:11px;}
+  .disk-head .eyebrow{margin:0;}
+  .disk-cap{font-weight:600;font-size:15px;letter-spacing:-.01em;}
+  .disk-sub{color:var(--ink-dim);font-size:12.5px;margin-left:auto;}
+  .disk-sub b{color:var(--ink);font-weight:600;}
+  .disk-bar{position:relative;height:15px;border-radius:7px;overflow:hidden;
+    background:var(--surface-2);border:1px solid var(--rule);}
+  .dseg{position:absolute;top:0;bottom:0;width:0;box-shadow:1px 0 0 var(--surface);
+    transition:left .55s cubic-bezier(.22,.61,.36,1),width .55s cubic-bezier(.22,.61,.36,1);}
+  .dseg.other{background:var(--ink-faint);}
+  .dseg.safe{background:var(--green);}
+  .dseg.review{background:var(--amber);}
+  .disk-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:11px;font-size:12px;color:var(--ink-dim);}
+  .disk-legend .lg{display:inline-flex;align-items:center;gap:7px;}
+  .disk-legend .dot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .disk-legend .lg .v{font-family:var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;}
+  .disk-legend .dot.other{background:var(--ink-faint);}
+  .disk-legend .dot.safe{background:var(--green);}
+  .disk-legend .dot.review{background:var(--amber);}
+  .disk-legend .dot.free{background:var(--surface-2);border:1px solid var(--ink-faint);}
+  .disk-proj{margin-top:11px;padding-top:10px;border-top:1px dashed var(--rule);
+    font-size:12.5px;color:var(--ink-dim);line-height:1.55;}
+  .disk-proj b{color:var(--green);font-weight:600;}
+  .disk-proj .r{color:var(--amber);font-weight:600;}
   .readout{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;}
   .readout .big{font-family:var(--mono);font-weight:600;letter-spacing:-.03em;
     font-size:clamp(46px,9vw,78px);line-height:.92;}
@@ -174,6 +202,22 @@
   .db-dock .warn{font-size:11.5px;color:var(--red);display:flex;align-items:center;gap:6px;}
   .db-dock .sel{font-family:var(--mono);font-size:13px;color:var(--ink-dim);}
 
+  /* Docker panel */
+  .dk-row{display:grid;grid-template-columns:auto 1fr 168px 84px;align-items:center;gap:14px;
+    padding:10px 18px;border-top:1px solid var(--rule);position:relative;}
+  .dk-row:hover{background:var(--surface-2);}
+  .dk-row.on{background:color-mix(in srgb,var(--cyan) 8%,transparent);}
+  .dk-row.on::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--cyan);box-shadow:0 0 10px var(--cyan);}
+  .dk-row.running{opacity:.72;}
+  .dk-when{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);white-space:nowrap;text-align:right;}
+  .dk-pill{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+    border-radius:999px;padding:1px 8px;border:1px solid var(--rule);flex:none;}
+  .dk-pill.run{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 45%,transparent);}
+  .dk-pill.stop{color:var(--ink-dim);}
+  .dk-pill.orph{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 45%,transparent);}
+  .dk-opt{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-dim);cursor:pointer;user-select:none;}
+  .dk-opt input{width:15px;height:15px;}
+
   /* protected read-only */
   .prot{background:transparent;border:1px dashed var(--rule);border-radius:14px;padding:16px 18px;margin-bottom:12px;}
   .prot h4{margin:0 0 3px;font-size:13px;font-weight:600;}
@@ -235,6 +279,7 @@
     .path{display:none;} .g-desc{display:none;}
     .row{grid-template-columns:auto 1fr auto;} .prop{display:none;}
     .db-row{grid-template-columns:auto 1fr auto;} .db-row .prop{display:none;}
+    .dk-row{grid-template-columns:auto 1fr auto;} .dk-when{display:none;}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
 </style>
@@ -261,6 +306,20 @@
 
 <main id="main" hidden>
   <section class="hero">
+    <div class="disk" id="disk" hidden>
+      <div class="disk-head">
+        <span class="eyebrow">Startup disk</span>
+        <span class="disk-cap mono" id="diskCap"></span>
+        <span class="disk-sub" id="diskSub"></span>
+      </div>
+      <div class="disk-bar" id="diskBar">
+        <div class="dseg other"  id="segOther"></div>
+        <div class="dseg safe"   id="segSafe"></div>
+        <div class="dseg review" id="segReview"></div>
+      </div>
+      <div class="disk-legend" id="diskLegend"></div>
+      <div class="disk-proj" id="diskProj"></div>
+    </div>
     <div class="eyebrow">Reclaimable space</div>
     <div class="readout">
       <div class="big mono" id="heroBig">0 <span class="unit">B</span></div>
@@ -280,6 +339,9 @@
 
   <div class="section-label" id="mysqlLabel" hidden><span class="eyebrow">Databases · MySQL — permanent purge</span><span class="hr"></span></div>
   <div id="mysql" class="db-panel" hidden></div>
+
+  <div class="section-label" id="dockerLabel" hidden><span class="eyebrow">Docker · images — removable, re-pulled on demand</span><span class="hr"></span></div>
+  <div id="docker" class="db-panel" hidden></div>
 </main>
 
 <div class="dock">
@@ -344,6 +406,7 @@ function onScanEvent(ev){
 function afterScan(){
   $('#loading').hidden=true; $('#main').hidden=false;
   $('#path').textContent=DATA.home;
+  renderDisk();
   TOTAL_KB=DATA.categories.reduce((s,c)=>s+(c.totalKb||0),0);
   MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb||0)),1);
   render();
@@ -354,6 +417,44 @@ function afterScan(){
   measureLazy();   // fill in sizes for deferred (lazy) groups without blocking the scan
 }
 function setHeroValue(kb){ const h=human(kb); $('#heroBig').innerHTML=`${h.v} <span class="unit">${h.u}</span>`; }
+
+/* ── startup-disk capacity strip (segmented, with a cleanup projection) ── */
+function renderDisk(){
+  const d=DATA.disk, wrap=$('#disk');
+  if(!d || !d.totalKb){ wrap.hidden=true; return; }
+  wrap.hidden=false;
+
+  const cats=DATA.categories||[];
+  const sumRisk=r=>cats.filter(c=>c.risk===r).reduce((a,c)=>a+(c.totalKb||0),0);
+  const safeKb=sumRisk('safe'), reviewKb=sumRisk('review'), reclaim=safeKb+reviewKb;
+  const otherKb=Math.max(0, d.usedKb-reclaim);   // used space this tool can't reclaim
+  const total=d.totalKb, pct=x=>100*x/total;
+  const usedPct=Math.round(100*d.usedKb/total);
+
+  $('#diskCap').textContent=`${humanStr(total)} total`;
+  $('#diskSub').innerHTML=`<b>${humanStr(d.usedKb)}</b> used (${usedPct}%) · <b>${humanStr(d.freeKb)}</b> free`;
+
+  const o=pct(otherKb), s=pct(safeKb), r=pct(reviewKb);
+  requestAnimationFrame(()=>{
+    const so=$('#segOther'), ss=$('#segSafe'), sr=$('#segReview');
+    so.style.left='0%';         so.style.width=o+'%';
+    ss.style.left=o+'%';        ss.style.width=s+'%';
+    sr.style.left=(o+s)+'%';    sr.style.width=r+'%';
+  });
+
+  $('#diskLegend').innerHTML=[
+    ['other','Other used',otherKb],
+    ['safe','Safe to clean',safeKb],
+    ['review','Review',reviewKb],
+    ['free','Free',d.freeKb],
+  ].map(([k,l,v])=>`<span class="lg"><span class="dot ${k}"></span>${l} <span class="v">${humanStr(v)}</span></span>`).join('');
+
+  const afterSafe=d.freeKb+safeKb, afterAll=d.freeKb+reclaim;
+  $('#diskProj').innerHTML =
+    `Clearing the <b>safe</b> groups frees <b>${humanStr(safeKb)}</b> → <b>${humanStr(afterSafe)} free</b>` +
+    ` (${Math.round(100*(d.usedKb-safeKb)/total)}% used). ` +
+    `Reviewing the rest could free <span class="r">${humanStr(reviewKb)}</span> more → up to <span class="r">${humanStr(afterAll)} free</span>.`;
+}
 function scan(){
   $('#main').hidden=true; $('#loading').hidden=false;
   resetLoad();
@@ -430,6 +531,12 @@ function render(){
   $('#mysqlLabel').hidden = !hasDB;
   $('#mysql').hidden = !hasDB;
   if (hasDB) renderDB();
+
+  // only surface the Docker panel on Macs that actually have Docker installed
+  const hasDocker = !!DATA.dockerInstalled;
+  $('#dockerLabel').hidden = !hasDocker;
+  $('#docker').hidden = !hasDocker;
+  if (hasDocker) renderDocker();
 }
 
 /* ── large files: review individually, with Reveal in Finder ── */
@@ -505,7 +612,7 @@ async function measureLazy(){
     const gs=g&&g.querySelector('.g-size');
     if(gs && c.totalKb!=null){ gs.textContent=humanStr(c.totalKb); gs.classList.remove('sz-lazy'); }
   });
-  setHeroValue(TOTAL_KB); renderTicks(); update();
+  setHeroValue(TOTAL_KB); renderTicks(); update(); renderDisk();
 }
 
 function refreshGroup(g){
@@ -638,6 +745,92 @@ async function dbPurge(){
   const rr=await (await fetch('/api/mysql/schemas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(MYSQL_CREDS)})).json();
   if(rr.ok) SCHEMAS=rr.schemas;
   renderDB();
+}
+
+/* ── Docker: image sizes, last usage & removal ── */
+let DOCKER=null;
+const dkDate = ms => new Date(ms).toISOString().slice(0,10);
+function dkAgo(ms){
+  const d=Math.round((Date.now()-ms)/86400000);
+  if(d<=0) return 'today'; if(d===1) return '1 day ago';
+  if(d<30) return d+' days ago';
+  const mo=Math.round(d/30); return mo+(mo===1?' month ago':' months ago');
+}
+async function renderDocker(force){
+  const p=$('#docker');
+  if(force) DOCKER=null;
+  if(DOCKER===null){
+    DOCKER='loading';
+    p.innerHTML=`<div class="db-intro"><span class="spin" style="display:inline-block;vertical-align:-3px"></span>&nbsp;&nbsp;Reading Docker images…</div>`;
+    try{ DOCKER=await (await fetch('/api/docker/images')).json(); }
+    catch{ DOCKER={ok:false,error:'could not reach the app'}; }
+    return renderDocker();
+  }
+  if(DOCKER==='loading') return;
+
+  const intro=`<div class="db-intro">Reclaim space from <b>Docker</b> images you no longer need. Images live inside the Linux VM and are <b>re-downloaded on demand</b>, so removal is safe but not instant to undo. “Last used” is the most recent time a container ran on the image.</div>`;
+  if(!DOCKER.ok){
+    p.innerHTML=intro+`<div class="db-err" style="padding:14px 18px">✕ ${DOCKER.error} <button class="btn-sm" id="dkRetry" style="margin-left:10px">Retry</button></div>`;
+    $('#dkRetry').addEventListener('click',()=>renderDocker(true));
+    return;
+  }
+  const imgs=DOCKER.images||[];
+  if(!imgs.length){ p.innerHTML=intro+`<div class="empty">No images — nothing to reclaim.</div>`; return; }
+  const totalB=imgs.reduce((a,i)=>a+(i.sizeBytes||0),0);
+  const removable=imgs.filter(i=>!i.running).length;
+  p.innerHTML=intro+`
+    <div class="db-total">
+      <span class="n mono">${humanB(totalB)}</span>
+      <span class="l">across ${imgs.length} images · ${removable} removable</span>
+      <span class="who">docker${DOCKER.serverVersion?' · engine '+DOCKER.serverVersion:''}</span>
+    </div>
+    ${imgs.map(im=>{
+      const pill = im.state==='running' ? `<span class="dk-pill run" title="In use by a running container — stop it first">in use</span>`
+                 : im.state==='stopped' ? `<span class="dk-pill stop" title="Pinned by a stopped container${im.containers.length?' — '+im.containers.join(', '):''}">stopped</span>`
+                 : `<span class="dk-pill orph" title="No container references it">unused</span>`;
+      const when = im.lastUsed ? `${dkDate(im.lastUsed)} · ${dkAgo(im.lastUsed)}` : 'never used';
+      return `
+      <label class="dk-row ${im.state}">
+        <input type="checkbox" class="dkpick" data-id="${im.id}" data-bytes="${im.sizeBytes||0}" ${im.running?'disabled':''}>
+        <span class="db-name"><span class="nm" title="${im.name}">${im.name.replace(/</g,'&lt;')}</span>${pill}</span>
+        <span class="dk-when">${when}</span>
+        <span class="sz">${im.size}</span>
+      </label>`;
+    }).join('')}
+    <div class="db-dock">
+      <label class="dk-opt"><input type="checkbox" id="dkRmC"> also remove stopped containers using them</label>
+      <span class="grow"></span>
+      <span class="sel" id="dkSel">0 selected</span>
+      <span class="warn">⚠ docker rmi — re-downloaded when next needed</span>
+      <button class="btn-danger" id="dkRemove" disabled>Remove images</button>
+    </div>`;
+  p.querySelectorAll('.dkpick').forEach(cb=>cb.addEventListener('change',()=>{cb.closest('.dk-row').classList.toggle('on',cb.checked);dkUpdate();}));
+  $('#dkRemove').addEventListener('click',dkRemove);
+  dkUpdate();
+}
+function dkSelected(){ return [...document.querySelectorAll('.dkpick:checked')]; }
+function dkUpdate(){
+  const rows=dkSelected(), bytes=rows.reduce((a,cb)=>a+ +cb.dataset.bytes,0);
+  $('#dkSel').textContent=`${rows.length} selected · ${humanB(bytes)}`;
+  $('#dkRemove').disabled=rows.length===0;
+}
+async function dkRemove(){
+  const rows=dkSelected(); if(!rows.length) return;
+  const ids=rows.map(cb=>cb.dataset.id);
+  const bytes=rows.reduce((a,cb)=>a+ +cb.dataset.bytes,0);
+  const rmC=$('#dkRmC').checked;
+  let msg=`Remove ${ids.length} Docker image${ids.length===1?'':'s'} — about ${humanB(bytes)}?\n\nImages are re-downloaded automatically the next time something needs them.`;
+  if(rmC) msg+=`\n\nAlso removing any STOPPED containers that use them.`;
+  if(!confirm(msg)) return;
+  const btn=$('#dkRemove'); btn.disabled=true; btn.textContent='Removing…';
+  const r=await (await fetch('/api/docker/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids,removeContainers:rmC,confirm:true})})).json();
+  if(!r.ok){ toast('✕ '+(r.error||'remove failed'),8000,true); btn.disabled=false; btn.textContent='Remove images'; return; }
+  const ok=r.results.filter(x=>x.ok), fail=r.results.filter(x=>!x.ok);
+  let out=`<b>Removed ${ok.length} image${ok.length===1?'':'s'}</b> — freed ~${humanB(r.freedBytes||0)}.`;
+  if(fail.length) out+=`<br><span style="color:var(--amber)">${fail.length} skipped:</span> ${fail.slice(0,2).map(f=>f.error).join('; ')}`;
+  toast(out,10000,fail.length>0);
+  renderDocker(true);
 }
 
 scan();

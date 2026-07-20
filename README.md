@@ -2,8 +2,8 @@
 
 A tiny **local** web app that scans the usual macOS temp / cache / junk locations,
 tells you which ones belong to apps that are currently running, and lets you
-**selectively** clean them from your browser — plus inspect and purge MySQL
-schemas by size.
+**selectively** clean them from your browser — plus a whole-disk **storage
+overview**, **MySQL** schema inspection, and **Docker** image cleanup, all by size.
 
 It runs entirely on `localhost`, has **zero dependencies** (Node.js built-ins
 only — nothing to `npm install`), and never sends anything off your machine.
@@ -25,12 +25,30 @@ only — nothing to `npm install`), and never sends anything off your machine.
 |---|---|
 | ![Scanning checklist — light](docs/screenshot-scanning-light.png) | ![Scanning checklist — dark](docs/screenshot-scanning-dark.png) |
 
+**Startup-disk overview** — a segmented bar (macOS-Storage style) that splits the
+whole disk into what this tool can't reclaim, what's **safe** to clean, what's
+worth a **review**, and free space — with a projection of the disk *after* cleaning:
+
+| Light | Dark |
+|---|---|
+| ![Startup disk overview — light](docs/screenshot-storage-light.png) | ![Startup disk overview — dark](docs/screenshot-storage-dark.png) |
+
+**Docker images** — sizes, last-used (from the most recent container run), and
+one-click removal of images you no longer need. Shown only when Docker is installed:
+
+| Light | Dark |
+|---|---|
+| ![Docker images panel — light](docs/screenshot-docker-light.png) | ![Docker images panel — dark](docs/screenshot-docker-dark.png) |
+
 <sub>Screenshots use synthetic demo data (`DEMO=1 node server.js`), not real disk contents.</sub>
 
 ---
 
 ## Highlights
 
+- **Whole-disk overview** — a segmented capacity bar at the top shows the startup
+  disk broken into *other used · safe to clean · review · free*, plus a live
+  projection: "clearing the safe groups frees X → Y free; review could free Z more."
 - **Recoverable by default** — filesystem "cleaning" *moves items to `~/.Trash`*.
   It never hard-deletes; you reclaim the space by emptying the Trash afterwards.
 - **Safe first** — groups are ordered `safe` before `review`, biggest first, so the
@@ -44,6 +62,9 @@ only — nothing to `npm install`), and never sends anything off your machine.
   opt-in deep scan when Spotlight is off.
 - **MySQL schema inspector** — shown only if MySQL is installed; see each database's
   real size and purge by name, with strong guardrails (see [Safety model](#safety-model)).
+- **Docker image cleanup** — shown only if Docker is installed; lists each image with
+  its size, last-used time, and state (in use / stopped / unused), and removes the
+  ones you pick (running images are locked).
 - **Adaptive** — every group is a generic macOS path; empty ones are hidden, so each
   Mac only sees what applies to it.
 
@@ -123,6 +144,7 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 | MySQL Workbench logs | `~/Library/Application Support/MySQL/Workbench/log/*` | safe |
 | Saved application state | `~/Library/Saved Application State/*` | safe |
 | Developer build caches | npm / Yarn / pnpm / Gradle / Cargo / Go / CocoaPods / pip caches + Xcode `DerivedData`, `CoreSimulator/Caches` | safe |
+| System logs | `/Library/Logs/*` (system-wide app & crash/DiagnosticReports logs) | review |
 | Maven repository | `~/.m2/repository` | review |
 | Containers (sandboxed app data) | `~/Library/Containers/*` | review |
 | Application Support | `~/Library/Application Support/*` (excl. `MobileSync`, `MySQL`) | review |
@@ -135,7 +157,10 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 **Containers and Application Support are real app data**, so deleting a folder
 resets or wipes that app (still recoverable from Trash). The **Maven repository**
 is `review` because clearing it makes every project re-download its dependencies
-on the next build (slow, needs network).
+on the next build (slow, needs network). **System logs** (`/Library/Logs`) are
+shared, system-domain files: entries owned by macOS need admin rights to remove
+and simply report an error rather than being force-removed. (`/var/log` is
+deliberately left out — those logs are actively written and root-owned.)
 
 > **Junk vs. real data inside Application Support.** MySQL Workbench keeps a
 > `sql_actions_*.log` activity log under `Application Support/MySQL/…/log` that can
@@ -160,6 +185,30 @@ Spotlight is off, a **deep scan** button walks the disk with `find` on demand.
 If a `mysql` client is present, a panel appears: connect → lists every schema with
 its size (from `information_schema`) and table count → select and `DROP DATABASE`.
 On Macs without MySQL, the panel is hidden entirely.
+
+### Docker images — shown only if Docker is installed
+
+If the `docker` CLI is present, a panel lists every image with its **size**,
+**last-used** time, and **state**:
+
+- **in use** — a container built on it is running; the image is **locked** (can't be selected).
+- **stopped** — only stopped containers reference it.
+- **unused** — no container references it (safe to remove).
+
+"Last used" is inferred from the most recent start/finish of any container on the
+image (Docker doesn't stamp images with a usage time). Select the ones you don't
+need and **Remove images** runs `docker rmi`; an opt-in checkbox also clears the
+**stopped** containers that pin an image. Images are re-downloaded on demand, so
+removal is space-back-now, re-pull-later — not a permanent data loss. If Docker is
+installed but the daemon is off, the panel says so with a **Retry**.
+
+### Startup-disk overview
+
+A segmented capacity bar at the top of the page (macOS-Storage style) shows the
+whole startup volume split into **other used** (not reclaimable here) · **safe to
+clean** · **review** · **free**, sized straight from `df`. Below it, a projection
+spells out the payoff: how much the *safe* groups free and the resulting free
+space, plus how much *review* could free on top.
 
 ---
 
@@ -190,6 +239,18 @@ revealed in Finder (`open -R`) or moved to Trash individually.
 **MySQL inspect & purge.** Credentials are entered in the UI, used per-request, and
 never stored. Sizes and table counts come straight from `information_schema`.
 
+**Storage overview.** A segmented bar reads the startup disk from `df` and splits it
+into *other used · safe · review · free*. On APFS the boot volume's own "Used" is
+misleadingly tiny (system data lives on a sibling volume sharing the container), so
+real usage is computed as **total − available**. A projection line shows the free
+space after clearing safe, and the extra the review tier could free.
+
+**Docker images.** Reads `docker images` for sizes and `docker inspect` on containers
+to derive each image's state and last-used time. Removal runs `docker rmi` (with an
+opt-in `docker rm` of the stopped containers pinning an image); images in use by a
+running container are refused. Loads on demand and only appears when Docker is
+installed — if the daemon is off, the panel offers a **Retry**.
+
 ---
 
 ## Dependencies & privacy
@@ -212,6 +273,7 @@ command-line tools** (via `child_process`), each for one clear purpose:
 | Tool | Used for |
 |---|---|
 | `du` | Measure folder/file sizes during a scan |
+| `df` | Read startup-disk capacity for the storage overview |
 | `mv` | Move selected items into `~/.Trash` (the clean action) |
 | `mdfind` | Spotlight search for large files (instant path) |
 | `mdutil` | Check whether Spotlight indexing is enabled |
@@ -220,9 +282,10 @@ command-line tools** (via `child_process`), each for one clear purpose:
 | `open` | Launch your browser at startup; "Reveal in Finder" (`open -R`) |
 | `bash` | Only `command -v mysql`, to locate the MySQL client |
 | `mysql` | **Optional** — only if installed; read schema sizes and run `DROP DATABASE` |
+| `docker` | **Optional** — only if installed; list image sizes/usage and run `docker rmi` |
 
-All are Apple-provided tools except `mysql`, which is invoked only when a client is
-present (the MySQL panel is hidden otherwise).
+All are Apple-provided tools except `mysql` and `docker`, which are invoked only
+when their CLI is present (their panels are hidden otherwise).
 
 ---
 
@@ -232,6 +295,7 @@ present (the MySQL panel is hidden otherwise).
 |---|---|---|
 | Clean files | ✅ moved to `~/.Trash` | Server recomputes an allow-list from the category definitions on every request; anything not on it is refused. |
 | Drop MySQL schema | ❌ **permanent** | Requires live credentials; system schemas (`mysql`, `information_schema`, `performance_schema`, `sys`) are refused; each name is re-validated against the live schema list; UI requires a listing confirmation **and** typing `PURGE`; the API requires `confirm: true`. |
+| Remove Docker image | ↩ re-pullable | Images backing a **running** container are refused; each id is validated; stopped containers are only removed with the opt-in checkbox; the API requires `confirm: true`. Removed images re-download on next use. |
 
 ---
 
@@ -239,12 +303,14 @@ present (the MySQL panel is hidden otherwise).
 
 ```
 Browser (public/index.html)
-   │  EventSource ─ /api/scan/stream ────► du per group (streams progress) + mdfind
+   │  EventSource ─ /api/scan/stream ────► du per group (streams progress) + mdfind + df
    │  fetch()  ──── /api/clean ──────────► mv <path> ~/.Trash   (allow-list checked)
    │           ──── /api/large-files/deep► find (pruned, time-boxed)
    │           ──── /api/reveal ─────────► open -R <path>   (show in Finder)
    │           ──── /api/mysql/schemas ─► mysql → information_schema
    │           ──── /api/mysql/drop ────► mysql → DROP DATABASE  (validated)
+   │           ──── /api/docker/images ─► docker images / inspect (size + last-used)
+   │           ──── /api/docker/remove ─► docker rmi  (running images refused)
    ▼
 Node HTTP server (server.js, 127.0.0.1 only, built-ins only)
 ```
@@ -253,7 +319,7 @@ Node HTTP server (server.js, 127.0.0.1 only, built-ins only)
 
 | Method & path | Body | Returns |
 |---|---|---|
-| `GET /api/scan` | — | Full scan JSON: categories (sizes + running flags), `largeFiles`, `spotlight`, `mysqlAvailable`. |
+| `GET /api/scan` | — | Full scan JSON: categories (sizes + running flags), `largeFiles`, `spotlight`, `disk` (`{totalKb, usedKb, freeKb}`), `mysqlAvailable`, `dockerInstalled`. |
 | `GET /api/scan/stream` | — | Same, as SSE: `progress` events `{label, done, total}` then a `result` event. |
 | `POST /api/clean` | `{ paths: [...] }` | Per-path result; each path validated against the allow-list, then `mv`d to Trash. |
 | `POST /api/size` | `{ paths: [...] }` | `{ sizes: { path: kb } }` — on-demand `du` for deferred (lazy) groups. |
@@ -261,6 +327,8 @@ Node HTTP server (server.js, 127.0.0.1 only, built-ins only)
 | `POST /api/reveal` | `{ path }` | Reveals the path in Finder (`open -R`); read-only. |
 | `POST /api/mysql/schemas` | `{ host, port, user, password }` | `{ ok, schemas: [{ name, bytes, tables, system }] }`. |
 | `POST /api/mysql/drop` | `{ …creds, databases: [...], confirm: true }` | Per-db result; system/unknown schemas refused. |
+| `GET /api/docker/images` | — | `{ ok, serverVersion, images: [{ id, name, size, sizeBytes, lastUsed, state, running, containers }] }`. |
+| `POST /api/docker/remove` | `{ ids: [...], removeContainers?, confirm: true }` | Per-image result + `freedBytes`; running-container images refused. |
 
 ---
 
