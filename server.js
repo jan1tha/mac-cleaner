@@ -27,6 +27,12 @@ const DEMO = process.env.DEMO === '1';
 const DEMO_DATA = {
   generatedAt: '2025-01-01T00:00:00.000Z', home: '/Users/alex', mysqlAvailable: true, spotlight: true,
   categories: [
+    { id: 'workbench-logs', title: 'MySQL Workbench logs', risk: 'safe',
+      desc: "Workbench's SQL-action activity logs — client-side junk, NOT your database data. Grows unbounded; Workbench just recreates it. Shown separately from real app data.", totalKb: 31_800_000,
+      items: [
+        { name: 'sql_actions_Local.log', kb: 31_700_000, path: '/Users/alex/Library/Application Support/MySQL/Workbench/log/sql_actions_Local.log', running: false, runVia: '' },
+        { name: 'wb.log', kb: 84, path: '/Users/alex/Library/Application Support/MySQL/Workbench/log/wb.log', running: false, runVia: '' },
+      ] },
     { id: 'dev-caches', title: 'Developer build caches', risk: 'safe',
       desc: 'Package-manager and build caches (npm, Yarn, Gradle, Cargo, Go). Re-downloaded on demand.', totalKb: 7_000_000,
       items: [
@@ -104,6 +110,9 @@ const CATEGORIES = [
   { id: 'logs', title: 'App logs  (~/Library/Logs)', risk: 'safe', run: true,
     desc: 'Application log files.',
     collect: () => listChildren(j('Library/Logs')) },
+  { id: 'workbench-logs', title: 'MySQL Workbench logs', risk: 'safe',
+    desc: "Workbench's SQL-action activity logs — client-side junk, NOT your database data. Grows unbounded (often tens of GB); Workbench just recreates it. Shown here separately from real app data.",
+    collect: () => listChildren(j('Library/Application Support/MySQL/Workbench/log')) },
   { id: 'saved-state', title: 'Saved application state', risk: 'safe', run: true,
     desc: 'Saved window/session state (~/Library/Saved Application State). Rebuilt as you use apps.',
     collect: () => listChildren(j('Library/Saved Application State')) },
@@ -137,8 +146,9 @@ const CATEGORIES = [
     desc: 'Local backups of iPhones/iPads (~/Library/Application Support/MobileSync). Often very large — keep only if you rely on local backups.',
     collect: () => listChildren(j('Library/Application Support/MobileSync/Backup')) },
   { id: 'app-support', title: 'Application Support  (real app data!)', risk: 'review', run: true,
-    desc: 'Each app keeps its settings, databases and saved files here. Deleting a folder resets or WIPES that app — not junk, so review carefully. (Big individual files inside show up under Large files below for targeted cleanup.)',
-    collect: () => listChildren(j('Library/Application Support')).filter(p => path.basename(p) !== 'MobileSync') },
+    desc: 'Each app keeps its settings, databases and saved files here. Deleting a folder resets or WIPES that app — not junk, so review carefully. (Device backups and MySQL Workbench logs are split into their own groups; big files show up under Large files.)',
+    collect: () => listChildren(j('Library/Application Support'))
+      .filter(p => !['MobileSync', 'MySQL'].includes(path.basename(p))) },
   { id: 'user-temp', title: 'User temp  ($TMPDIR)', risk: 'review',
     desc: 'Per-user temp files. A running app may be using some — close apps first.',
     collect: () => listChildren(os.tmpdir()) },

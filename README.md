@@ -120,11 +120,12 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 | App updater leftovers | `~/Library/Caches/*.ShipIt` | safe |
 | App caches | `~/Library/Caches/*` | safe |
 | App logs | `~/Library/Logs/*` | safe |
+| MySQL Workbench logs | `~/Library/Application Support/MySQL/Workbench/log/*` | safe |
 | Saved application state | `~/Library/Saved Application State/*` | safe |
 | Developer build caches | npm / Yarn / pnpm / Gradle / Cargo / Go / CocoaPods / pip caches + Xcode `DerivedData`, `CoreSimulator/Caches` | safe |
 | Maven repository | `~/.m2/repository` | review |
 | Containers (sandboxed app data) | `~/Library/Containers/*` | review |
-| Application Support | `~/Library/Application Support/*` (excl. `MobileSync`) | review |
+| Application Support | `~/Library/Application Support/*` (excl. `MobileSync`, `MySQL`) | review |
 | Xcode device support & simulators | `iOS/watchOS/tvOS DeviceSupport`, `Archives`, `CoreSimulator/Devices` | review |
 | iOS / iPadOS device backups | `~/Library/Application Support/MobileSync/Backup/*` | review |
 | User temp | `$TMPDIR/*` | review |
@@ -135,6 +136,12 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 resets or wipes that app (still recoverable from Trash). The **Maven repository**
 is `review` because clearing it makes every project re-download its dependencies
 on the next build (slow, needs network).
+
+> **Junk vs. real data inside Application Support.** MySQL Workbench keeps a
+> `sql_actions_*.log` activity log under `Application Support/MySQL/…/log` that can
+> grow to tens of GB. It's client-side logging, **not** database data, so it's split
+> out into its own `safe` **MySQL Workbench logs** group — and excluded from the
+> Application Support group so nothing is counted twice.
 
 > **Deferred sizing.** The Maven repo has tens of thousands of tiny files and is
 > slow to measure (there's no stored directory size on macOS — `du` must walk it).
