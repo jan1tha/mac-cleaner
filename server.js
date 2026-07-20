@@ -52,6 +52,10 @@ const DEMO_DATA = {
       desc: 'Application log files.', totalKb: 342_000,
       items: [{ name: 'JetBrains', kb: 210_000, path: '/Users/alex/Library/Logs/JetBrains', running: false, runVia: '' },
         { name: 'zoom.us', kb: 132_000, path: '/Users/alex/Library/Logs/zoom.us', running: false, runVia: '' }] },
+    { id: 'system-logs', title: 'System logs  (/Library/Logs)', risk: 'review',
+      desc: 'System-wide application and crash/diagnostic logs shared by all users (/Library/Logs, including its DiagnosticReports crash reports).', totalKb: 118_000,
+      items: [{ name: 'DiagnosticReports', kb: 86_000, path: '/Library/Logs/DiagnosticReports', running: false, runVia: '' },
+        { name: 'Adobe', kb: 32_000, path: '/Library/Logs/Adobe', running: false, runVia: '' }] },
     { id: 'app-support', title: 'Application Support  (real app data!)', risk: 'review',
       desc: 'Each app keeps its settings, databases and saved files here. Deleting a folder resets or WIPES that app — not junk, so review carefully.', totalKb: 24_600_000,
       items: [
@@ -95,11 +99,16 @@ function childrenOfAll(dirs) { return dirs.flatMap(listChildren); }
 function existing(paths) { return paths.filter(exists); }
 
 // ---------- category definitions ----------
-// These are GENERIC macOS user-domain locations, not tied to any one machine.
-// All paths live under ~/Library, ~/ or $TMPDIR, which are stable across macOS
-// versions (Monterey → Sequoia and beyond). Any category that resolves to zero
-// items on a given Mac is dropped from the scan, so a machine only ever sees the
-// groups that actually apply to it (no Xcode installed → no Xcode groups, etc.).
+// These are GENERIC macOS locations, not tied to any one machine. Most live in
+// the user domain (~/Library, ~/ or $TMPDIR), which is stable across macOS
+// versions (Monterey → Sequoia and beyond). A couple of well-known SYSTEM log
+// locations (/Library/Logs) are included too — they exist on every Mac even
+// when empty here; any entry owned by macOS simply fails to move to the Trash
+// (reported per-path) instead of being force-removed. (/var/log is intentionally
+// left out: those logs are actively written and root-owned, so they don't fit a
+// trash-based, user-run cleaner.) Any category that resolves to zero items on a
+// given Mac is dropped from the scan, so a machine only ever sees the groups
+// that actually apply to it (no Xcode installed → no Xcode groups, etc.).
 const CATEGORIES = [
   { id: 'updaters', title: 'App updater leftovers', risk: 'safe', run: true,
     desc: 'Downloaded auto-update packages (*.ShipIt). Pure junk.',
@@ -110,6 +119,9 @@ const CATEGORIES = [
   { id: 'logs', title: 'App logs  (~/Library/Logs)', risk: 'safe', run: true,
     desc: 'Application log files.',
     collect: () => listChildren(j('Library/Logs')) },
+  { id: 'system-logs', title: 'System logs  (/Library/Logs)', risk: 'review',
+    desc: 'System-wide application and crash/diagnostic logs shared by all users (/Library/Logs, including its DiagnosticReports crash reports). Present on every Mac. Entries owned by macOS need admin rights to remove and will report an error rather than being touched.',
+    collect: () => listChildren('/Library/Logs') },
   { id: 'workbench-logs', title: 'MySQL Workbench logs', risk: 'safe',
     desc: "Workbench's SQL-action activity logs — client-side junk, NOT your database data. Grows unbounded (often tens of GB); Workbench just recreates it. Shown here separately from real app data.",
     collect: () => listChildren(j('Library/Application Support/MySQL/Workbench/log')) },
