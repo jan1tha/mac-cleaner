@@ -185,6 +185,40 @@ never stored. Sizes and table counts come straight from `information_schema`.
 
 ---
 
+## Dependencies & privacy
+
+This tool is deliberately easy to trust — there is **no third-party code** to audit.
+
+- **Zero npm dependencies.** `package.json` has empty `dependencies`/`devDependencies`,
+  there is no `node_modules` and no lockfile. `server.js` imports only Node.js
+  **built-in** modules: `http`, `fs`, `os`, `path`, `child_process`.
+- **Self-contained frontend.** `public/index.html` loads no CDN, no web fonts, no
+  remote scripts — all CSS/JS is inline, the favicon is an inline SVG, and it uses
+  system fonts. Nothing is fetched off your machine.
+- **Local only.** The server binds to `127.0.0.1`, so it is not reachable from other
+  machines, and it makes **no outbound network calls** — nothing about your disk
+  leaves your computer.
+
+Instead of libraries, the server shells out to standard, preinstalled **macOS
+command-line tools** (via `child_process`), each for one clear purpose:
+
+| Tool | Used for |
+|---|---|
+| `du` | Measure folder/file sizes during a scan |
+| `mv` | Move selected items into `~/.Trash` (the clean action) |
+| `mdfind` | Spotlight search for large files (instant path) |
+| `mdutil` | Check whether Spotlight indexing is enabled |
+| `find` | Opt-in deep large-file scan when Spotlight is off |
+| `lsappinfo`, `ps` | Detect which apps are currently running |
+| `open` | Launch your browser at startup; "Reveal in Finder" (`open -R`) |
+| `bash` | Only `command -v mysql`, to locate the MySQL client |
+| `mysql` | **Optional** — only if installed; read schema sizes and run `DROP DATABASE` |
+
+All are Apple-provided tools except `mysql`, which is invoked only when a client is
+present (the MySQL panel is hidden otherwise).
+
+---
+
 ## Safety model
 
 | Action | Reversible? | Guardrails |
