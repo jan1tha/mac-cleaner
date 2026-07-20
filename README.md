@@ -144,10 +144,9 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 | MySQL Workbench logs | `~/Library/Application Support/MySQL/Workbench/log/*` | safe |
 | Saved application state | `~/Library/Saved Application State/*` | safe |
 | Developer build caches | npm / Yarn / pnpm / Gradle / Cargo / Go / CocoaPods / pip caches + Xcode `DerivedData`, `CoreSimulator/Caches` | safe |
-| WSO2 update backups | `~/.wso2-updates/backup/*` (pre-patch product snapshots) | safe |
+| WSO2 Update tool | `~/.wso2-updates/{backup,updates}` — two sub-items: `backup` + `updates` (pinned last in the safe list) | safe |
 | System logs | `/Library/Logs/*` (system-wide app & crash/DiagnosticReports logs) | review |
 | Maven repository | `~/.m2/repository` | review |
-| WSO2 downloaded updates | `~/.wso2-updates/updates/*` (downloaded update payloads; re-downloaded on demand) | review |
 | Containers (sandboxed app data) | `~/Library/Containers/*` | review |
 | Application Support | `~/Library/Application Support/*` (excl. `MobileSync`, `MySQL`) | review |
 | Xcode device support & simulators | `iOS/watchOS/tvOS DeviceSupport`, `Archives`, `CoreSimulator/Devices` | review |
@@ -159,8 +158,11 @@ Groups are ordered **safe first, then review** (biggest first within each tier).
 **Containers and Application Support are real app data**, so deleting a folder
 resets or wipes that app (still recoverable from Trash). The **Maven repository**
 is `review` because clearing it makes every project re-download its dependencies
-on the next build (slow, needs network) — the **WSO2 downloaded updates** store is
-`review` for the same reason. **System logs** (`/Library/Logs`) are
+on the next build (slow, needs network). The **WSO2 Update tool** group is listed
+last under `safe`, but mind its two sub-items: removing `backup` means you can no
+longer **roll back an update on your local servers**, and removing `updates` makes
+the next **local-binary update take longer** (the payloads re-download). **System
+logs** (`/Library/Logs`) are
 shared, system-domain files: entries owned by macOS need admin rights to remove
 and simply report an error rather than being force-removed. (`/var/log` is
 deliberately left out — those logs are actively written and root-owned.)
