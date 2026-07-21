@@ -418,6 +418,31 @@ function afterScan(){
 }
 function setHeroValue(kb){ const h=human(kb); $('#heroBig').innerHTML=`${h.v} <span class="unit">${h.u}</span>`; }
 
+/* ── drop trashed items in place — avoids a full rescan after cleaning ── */
+function removeTrashedPaths(paths){
+  const gone=new Set(paths);
+  if(!gone.size) return;
+  // remove from category groups + recompute their totals
+  for(const c of DATA.categories){
+    c.items=c.items.filter(i=>!gone.has(i.path));
+    c.totalKb=c.items.reduce((s,i)=>s+(i.kb||0),0);
+  }
+  // remove from the large-files list too (trashed one-off files live here)
+  if(Array.isArray(DATA.largeFiles)) DATA.largeFiles=DATA.largeFiles.filter(f=>!gone.has(f.path));
+  // recompute aggregates
+  TOTAL_KB=DATA.categories.reduce((s,c)=>s+(c.totalKb||0),0);
+  MAX_ITEM_KB=Math.max(1,...DATA.categories.flatMap(c=>c.items.map(i=>i.kb||0)),1);
+  // re-render, preserving which groups the user had expanded
+  const open=new Set([...document.querySelectorAll('.group.open')].map(g=>g.dataset.cat));
+  render();
+  open.forEach(id=>{ const g=document.querySelector(`.group[data-cat="${id}"]`); if(g) g.classList.add('open'); });
+  // refresh hero + strips + selection totals
+  setHeroValue(TOTAL_KB);
+  const items=DATA.categories.reduce((s,c)=>s+c.items.length,0);
+  $('#heroSub').innerHTML=`across <b>${DATA.categories.length}</b> groups · <b>${items}</b> items`;
+  renderDisk(); renderTicks(); update();
+}
+
 /* ── startup-disk capacity strip (segmented, with a cleanup projection) ── */
 function renderDisk(){
   const d=DATA.disk, wrap=$('#disk');
@@ -583,7 +608,7 @@ async function trashFile(p,kb,btn){
   btn.disabled=true; btn.textContent='Moving…';
   const res=await (await fetch('/api/clean',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:[p]})})).json();
   const r=res.results&&res.results[0];
-  if(r&&r.ok){ toast(`<b>Moved to Trash</b> — freed ${humanStr(res.freedKb||0)}.`,7000); scan(); }
+  if(r&&r.ok){ toast(`<b>Moved to Trash</b> — freed ${humanStr(res.freedKb||0)}.`,7000); removeTrashedPaths([p]); }
   else { toast('✕ '+((r&&r.error)||'failed'),7000,true); btn.disabled=false; btn.textContent='Trash'; }
 }
 
@@ -663,7 +688,7 @@ $('#clean').addEventListener('click',async()=>{
   if(fail.length) out+=`<br><span style="color:var(--amber)">${fail.length} skipped:</span> ${fail.slice(0,2).map(f=>f.error).join(', ')}`;
   toast(out,10000);
   btn.textContent='Move to Trash';
-  await scan();
+  removeTrashedPaths(res.results.filter(x=>x.ok).map(x=>x.path));
 });
 
 /* ── FEATURE 3: MySQL inspect & purge ── */
